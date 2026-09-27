@@ -1,0 +1,22 @@
+[
+  {"elementType":"geometry","stylers":[{"color":"#0d1117"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#8b949e"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#0d1117"}]},
+  {"featureType":"administrative","elementType":"geometry","stylers":[{"color":"#1c2128"}]},
+  {"featureType":"administrative.country","elementType":"labels.text.fill","stylers":[{"color":"#9ca3af"}]},
+  {"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"#c9d1d9"}]},
+  {"featureType":"poi","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#161b22"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#21262d"}]},
+  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#0d1117"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#6e7681"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2d333b"}]},
+  {"featureType":"road.highway","elementType":"labels.text.fill","stylers":[{"color":"#8b949e"}]},
+  {"featureType":"transit","elementType":"geometry","stylers":[{"color":"#161b22"}]},
+  {"featureType":"transit.line","elementType":"geometry.fill","stylers":[{"color":"#30363d"}]},
+  {"featureType":"transit.station","elementType":"labels.text.fill","stylers":[{"color":"#8b949e"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#060d1a"}]},
+  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#3d444d"}]},
+  {"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#0d1117"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry.fill","stylers":[{"color":"#161b22"}]}
+]
