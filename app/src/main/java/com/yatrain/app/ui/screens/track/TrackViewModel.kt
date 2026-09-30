@@ -20,6 +20,7 @@ import com.yatrain.app.models.SavedStationAlert
 import com.yatrain.app.models.SavedTrain
 import com.yatrain.app.models.Station
 import com.yatrain.app.models.Train
+import com.yatrain.app.ui.screens.track.allStationsForSearch
 import com.yatrain.app.services.SavedDataRepository
 import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
@@ -71,6 +72,9 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
     private val _showingPopularTrains = MutableStateFlow(false)
     val showingPopularTrains: StateFlow<Boolean> = _showingPopularTrains.asStateFlow()
 
+    private val _stationSuggestions = MutableStateFlow<List<StationInfo>>(emptyList())
+    val stationSuggestions: StateFlow<List<StationInfo>> = _stationSuggestions.asStateFlow()
+
     // ── Alert state ───────────────────────────────────────────────────────────
 
     private val _alertedStations = MutableStateFlow<Set<String>>(emptySet())
@@ -111,12 +115,21 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _showingPopularTrains.value = false
         _detectedStation.value = station
         _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
+        _isLocating.value = false
     }
 
-    /** Called by the "Live Trains" button — briefly clears then reloads the schedule. */
+    /** Call before tryGetLocation() so the spinner appears immediately. */
+    fun startLocating() { _isLocating.value = true }
+
+    /** Called by the "Live Trains" button — shows spinner then reloads the schedule. */
     fun refreshLiveTrains() {
         val station = _detectedStation.value ?: return
-        _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
+        viewModelScope.launch {
+            _isLocating.value = true
+            kotlinx.coroutines.delay(600)
+            _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
+            _isLocating.value = false
+        }
     }
 
     /**
@@ -147,10 +160,38 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _query.value = newQuery
         searchJob?.cancel()
         val trimmed = newQuery.trim()
+
+        // Station name typeahead — trigger when user types letters
+        if (trimmed.any { it.isLetter() }) {
+            if (trimmed.length >= 3) {
+                val q = trimmed.lowercase()
+                _stationSuggestions.value = allStationsForSearch.filter { s ->
+                    s.name.lowercase().contains(q) ||
+                    s.city.lowercase().contains(q) ||
+                    s.code.lowercase().startsWith(q)
+                }.take(8)
+            } else {
+                _stationSuggestions.value = emptyList()
+            }
+            _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
+            return
+        }
+
+        _stationSuggestions.value = emptyList()
         if (trimmed.length < 4) {
             _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
         }
         // No auto-search on keystroke — search fires only on explicit search() call
+    }
+
+    fun onStationSelected(station: StationInfo) {
+        searchJob?.cancel()
+        _query.value = station.name
+        _stationSuggestions.value = emptyList()
+        _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
+        _showingPopularTrains.value = false
+        _detectedStation.value = station
+        _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
     }
 
     fun search() {

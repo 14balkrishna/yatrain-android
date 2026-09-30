@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -269,7 +270,9 @@ fun LiveMapSheet(
     delayMin:         Int,
     alertedStations:  Set<String>,
     onAlertToggle:    (Station) -> Unit,
-    onDismiss:        () -> Unit
+    onDismiss:        () -> Unit,
+    isPro:            Boolean = true,
+    onUpgrade:        () -> Unit = {}
 ) {
     val s        = LocalStrings.current
     val context  = LocalContext.current
@@ -407,7 +410,9 @@ fun LiveMapSheet(
             // Map
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 GoogleMap(
-                    modifier            = Modifier.fillMaxSize(),
+                    modifier            = Modifier.fillMaxSize().then(
+                        if (!isPro) Modifier.alpha(0.15f) else Modifier
+                    ),
                     cameraPositionState = camState,
                     uiSettings = MapUiSettings(
                         zoomControlsEnabled     = false,
@@ -539,6 +544,56 @@ fun LiveMapSheet(
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text("−", fontSize = 22.sp, color = Color(0xFF333333),
                                 fontWeight = FontWeight.Light)
+                        }
+                    }
+                }
+
+                // Blurred map paywall overlay — shown to free users
+                if (!isPro) {
+                    Box(
+                        Modifier.fillMaxSize().background(Color(0xBB000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            shape  = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2340)),
+                            modifier = Modifier.padding(horizontal = 32.dp)
+                        ) {
+                            Column(
+                                horizontalAlignment  = Alignment.CenterHorizontally,
+                                verticalArrangement  = Arrangement.spacedBy(12.dp),
+                                modifier             = Modifier.padding(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Lock, null,
+                                    tint     = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(40.dp)
+                                )
+                                Text(
+                                    "Live Map is Pro",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize   = 18.sp,
+                                    color      = Color.White
+                                )
+                                Text(
+                                    "Watch the train move on Google Maps in real time — stations, ETA and all.",
+                                    fontSize   = 13.sp,
+                                    color      = Color(0xFFAAAAAA),
+                                    textAlign  = TextAlign.Center
+                                )
+                                Button(
+                                    onClick  = onUpgrade,
+                                    colors   = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                                    shape    = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "Unlock Pro · ₹49/mo",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize   = 14.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }

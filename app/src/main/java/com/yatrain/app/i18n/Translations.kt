@@ -38,6 +38,7 @@ fun stringsForCode(code: String): AppStrings = when (code) {
 // English
 // ─────────────────────────────────────────────────────────────────────────────
 val EnglishStrings = AppStrings(
+    langCode = "en",
     tabStation = "Station", tabTrack = "Track", tabSleep = "Sleep", tabYou = "You",
     findTrain = "Find Train  →", searchHint = "Train number (e.g. 12951) or 10-digit PNR",
     viewAll = "View all →", cancel = "Cancel",
@@ -160,6 +161,7 @@ val EnglishStrings = AppStrings(
 // Hindi — हिन्दी
 // ─────────────────────────────────────────────────────────────────────────────
 val HindiStrings = AppStrings(
+    langCode = "hi",
     tabStation = "स्टेशन", tabTrack = "ट्रैक", tabSleep = "नींद", tabYou = "आप",
     findTrain = "ट्रेन खोजें →", searchHint = "PNR, ट्रेन नंबर या टिकट नंबर...",
     viewAll = "सभी देखें →", cancel = "रद्द करें",
@@ -282,6 +284,7 @@ val HindiStrings = AppStrings(
 // Marathi — मराठी
 // ─────────────────────────────────────────────────────────────────────────────
 val MarathiStrings = AppStrings(
+    langCode = "mr",
     tabStation = "स्थानक", tabTrack = "मार्ग", tabSleep = "झोप", tabYou = "तुम्ही",
     findTrain = "ट्रेन शोधा →", searchHint = "PNR, ट्रेन नंबर किंवा तिकीट नंबर...",
     viewAll = "सर्व पहा →", cancel = "रद्द करा",
@@ -404,6 +407,7 @@ val MarathiStrings = AppStrings(
 // Gujarati — ગુજરાતી
 // ─────────────────────────────────────────────────────────────────────────────
 val GujaratiStrings = AppStrings(
+    langCode = "gu",
     tabStation = "સ્ટેશન", tabTrack = "ટ્રૅક", tabSleep = "ઊંઘ", tabYou = "તમે",
     findTrain = "ટ્રેન શોધો →", searchHint = "PNR, ટ્રેન નંબર અથવા ટિકિટ નંબર...",
     viewAll = "બધું જુઓ →", cancel = "રદ કરો",
@@ -526,6 +530,7 @@ val GujaratiStrings = AppStrings(
 // Tamil — தமிழ்
 // ─────────────────────────────────────────────────────────────────────────────
 val TamilStrings = AppStrings(
+    langCode = "ta",
     tabStation = "நிலையம்", tabTrack = "தடம்", tabSleep = "தூக்கம்", tabYou = "நீங்கள்",
     findTrain = "ரயில் கண்டுபிடி →", searchHint = "PNR, ரயில் எண் அல்லது டிக்கெட் எண்...",
     viewAll = "அனைத்தும் காண →", cancel = "ரத்து செய்",
@@ -648,6 +653,7 @@ val TamilStrings = AppStrings(
 // Telugu — తెలుగు
 // ─────────────────────────────────────────────────────────────────────────────
 val TeluguStrings = AppStrings(
+    langCode = "te",
     tabStation = "స్టేషన్", tabTrack = "ట్రాక్", tabSleep = "నిద్ర", tabYou = "మీరు",
     findTrain = "రైలు కనుగొనండి →", searchHint = "PNR, రైలు నంబర్ లేదా టికెట్ నంబర్...",
     viewAll = "అన్నీ చూడండి →", cancel = "రద్దు",
@@ -770,6 +776,7 @@ val TeluguStrings = AppStrings(
 // Kannada — ಕನ್ನಡ
 // ─────────────────────────────────────────────────────────────────────────────
 val KannadaStrings = AppStrings(
+    langCode = "kn",
     tabStation = "ನಿಲ್ದಾಣ", tabTrack = "ಟ್ರ್ಯಾಕ್", tabSleep = "ನಿದ್ದೆ", tabYou = "ನೀವು",
     findTrain = "ರೈಲು ಹುಡುಕಿ →", searchHint = "PNR, ರೈಲು ಸಂಖ್ಯೆ ಅಥವಾ ಟಿಕೆಟ್ ಸಂಖ್ಯೆ...",
     viewAll = "ಎಲ್ಲ ನೋಡಿ →", cancel = "ರದ್ದು",

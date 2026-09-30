@@ -12,3 +12,4 @@
 
 # Secrets — never commit
 secrets.properties
+app/release/

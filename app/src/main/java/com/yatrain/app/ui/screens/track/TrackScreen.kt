@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yatrain.app.i18n.LocalStrings
+import com.yatrain.app.i18n.localTrainName
 import com.yatrain.app.models.PNRStatus
 import com.yatrain.app.models.Station
 import com.yatrain.app.models.Train
@@ -108,6 +109,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
     val liveTrains           by viewModel.liveTrains.collectAsStateWithLifecycle()
     val isLocating           by viewModel.isLocating.collectAsStateWithLifecycle()
     val showingPopularTrains by viewModel.showingPopularTrains.collectAsStateWithLifecycle()
+    val stationSuggestions   by viewModel.stationSuggestions.collectAsStateWithLifecycle()
     val currentStop     by viewModel.currentStopIndex.collectAsStateWithLifecycle()
     val isTrainSaved    by viewModel.isTrainSaved.collectAsStateWithLifecycle()
     val pnrContext      by viewModel.pnrContext.collectAsStateWithLifecycle()
@@ -189,6 +191,21 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                 )
             }
 
+            // ── Station name suggestions ─────────────────────────────────────
+            if (stationSuggestions.isNotEmpty()) {
+                item {
+                    com.yatrain.app.ui.screens.search.StationSuggestionsCard(
+                        suggestions = stationSuggestions,
+                        onSelect    = { station ->
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            viewModel.onStationSelected(station)
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
             // ── Pro banner ───────────────────────────────────────────────────
             if (!hasResult) {
                 item {
@@ -255,7 +272,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                 item {
                     RouteStreamHeader(
                         stopCount = schedule.size,
-                        trainName = trainResult?.name ?: ""
+                        trainName = (trainResult?.name ?: "").localTrainName()
                     )
                 }
 
@@ -324,19 +341,23 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                             )
                         }
                     }
-                    // Live Trains button — tapping refreshes the schedule
+                    // Live Trains button — tapping re-detects location and refreshes
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50.dp))
                             .background(Color(0xFF22C55E))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                if (detectedStation != null) viewModel.refreshLiveTrains()
-                                else locationLauncher.launch(
-                                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-                                )
+                            .clickable(enabled = !isLocating) {
+                                val hasPerm = ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.ACCESS_COARSE_LOCATION
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPerm) {
+                                    viewModel.startLocating()
+                                    tryGetLocation()
+                                } else {
+                                    locationLauncher.launch(
+                                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                                    )
+                                }
                             }
                             .padding(horizontal = 14.dp, vertical = 9.dp),
                         verticalAlignment     = Alignment.CenterVertically,
@@ -795,13 +816,13 @@ private fun LiveStatusCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = { if (isPro) showLiveMap = true else onShowPaywall() },
+                    onClick = { showLiveMap = true },
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(14.dp),
                     colors   = ButtonDefaults.buttonColors(containerColor = AppOrange)
                 ) {
                     Icon(
-                        if (isPro) Icons.Outlined.Map else Icons.Outlined.Lock,
+                        Icons.Outlined.Map,
                         null, modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
@@ -885,17 +906,19 @@ private fun LiveStatusCard(
         }
     }
 
-    // Live map sheet (Pro only)
+    // Live map sheet — free users see blurred preview with upgrade card
     if (showLiveMap) {
         LiveMapSheet(
-            trainName        = train?.name ?: "",
+            trainName        = (train?.name ?: "").localTrainName(),
             trainNumber      = train?.number ?: "",
             schedule         = schedule,
             currentStopIndex = currentStopIndex,
             delayMin         = 0,
             alertedStations  = alertedStations,
             onAlertToggle    = onAlertToggle,
-            onDismiss        = { showLiveMap = false }
+            onDismiss        = { showLiveMap = false },
+            isPro            = isPro,
+            onUpgrade        = { showLiveMap = false; onShowPaywall() }
         )
     }
 }
@@ -1673,7 +1696,7 @@ private fun LiveTrainRow(train: LiveTrainEntry, onTap: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    train.name,
+                    train.name.localTrainName(),
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color      = Color(0xFF1565C0),

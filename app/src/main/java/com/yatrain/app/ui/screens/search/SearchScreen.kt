@@ -61,6 +61,7 @@ import com.yatrain.app.ui.screens.track.LiveTrainEntry
 import com.yatrain.app.ui.screens.track.StationInfo
 import com.yatrain.app.ui.screens.track.stationNameFor
 import com.yatrain.app.i18n.LocalStrings
+import com.yatrain.app.i18n.localTrainName
 import com.yatrain.app.ui.components.HeroSection
 import com.yatrain.app.ui.components.ProBannerCard
 import com.yatrain.app.ui.screens.subscription.ProPaywallSheet
@@ -510,7 +511,7 @@ private fun PopularTrainCard(train: PopularTrain, onClick: () -> Unit) {
                         }
                     }
                 }
-                Text(train.name, fontSize = 12.sp, color = AppBody, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(train.name.localTrainName(), fontSize = 12.sp, color = AppBody, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${train.from} → ${train.to}", fontSize = 11.sp, color = Zinc500, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.Outlined.ChevronRight, null, tint = AppOrange, modifier = Modifier.size(18.dp))
@@ -927,8 +928,12 @@ private fun CoachMapCard(
                     contentPadding        = PaddingValues(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(coaches) { coach ->
-                        CoachItem(coach = coach, shimmerProgress = shimmer)
+                    itemsIndexed(coaches) { idx, coach ->
+                        CoachItem(
+                            coach          = coach,
+                            shimmerProgress = shimmer,
+                            mirrored       = idx == coaches.lastIndex && coach.kind == CoachKind.LOCO
+                        )
                     }
                 }
                 // Disabled overlay when no PNR entered (only in self-entry mode)
@@ -967,7 +972,7 @@ private fun CoachMapCard(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CoachItem(coach: CoachInfo, shimmerProgress: Float) {
+private fun CoachItem(coach: CoachInfo, shimmerProgress: Float, mirrored: Boolean = false) {
     // Flat colour palette: warm salmon when highlighted, cool blue-gray otherwise
     val bodyBg   = if (coach.highlighted) Color(0xFFFFF0EC) else Color(0xFFEBF0F8)
     val winBg    = if (coach.highlighted) Color(0xFFFFD5C5) else Color(0xFFCDD9EE)
@@ -1001,73 +1006,165 @@ private fun CoachItem(coach: CoachInfo, shimmerProgress: Float) {
         Canvas(modifier = Modifier.fillMaxWidth().height(88.dp)) {
             val w  = size.width
             val h  = size.height
+            val cr = 6.dp.toPx()
 
-            // ── Proportions ────────────────────────────────────────────────
-            val cr     = 6.dp.toPx()
-            val bodyH  = h * 0.62f
-            val bodyT  = 0f
-            val bodyB  = bodyT + bodyH
+            if (coach.kind == CoachKind.LOCO) {
+                // ── VANDE BHARAT style LOCOMOTIVE ─────────────────────────
+                val vbSilver = Color(0xFFEEF0F8)
+                val vbBlue   = Color(0xFF003B9A)
+                val vbGlass  = Color(0xFF1A2633)
+                val vbWheel  = Color(0xFF455A64)
 
-            val nWin   = if (coach.kind == CoachKind.POWER || coach.kind == CoachKind.LOCO) 3 else 4
-            val winPad = 7.dp.toPx()
-            val winGap = 4.dp.toPx()
-            val winW   = (w - 2 * winPad - (nWin - 1) * winGap) / nWin
-            val winH   = bodyH * 0.30f
-            val winY   = bodyT + bodyH * 0.10f
-            val winCR  = 2.5f.dp.toPx()
+                val bodyH    = h * 0.57f
+                val bodyT    = h * 0.06f
+                val bodyB    = bodyT + bodyH
+                val noseW    = w * 0.28f
+                val leftFace = !mirrored
 
-            val ucH    = h * 0.085f
-            val ucT    = bodyB
-            val ucB    = ucT + ucH
+                // Smooth bullet-nose body outline
+                val bodyOutline = Path()
+                if (leftFace) {
+                    bodyOutline.moveTo(w - cr, bodyT)
+                    bodyOutline.quadraticTo(w, bodyT, w, bodyT + cr)
+                    bodyOutline.lineTo(w, bodyB - cr)
+                    bodyOutline.quadraticTo(w, bodyB, w - cr, bodyB)
+                    bodyOutline.lineTo(noseW, bodyB)
+                    bodyOutline.cubicTo(noseW * 0.35f, bodyB, 0f, bodyB - bodyH * 0.17f, 0f, bodyT + bodyH * 0.5f)
+                    bodyOutline.cubicTo(0f, bodyT + bodyH * 0.17f, noseW * 0.35f, bodyT, noseW, bodyT)
+                    bodyOutline.close()
+                } else {
+                    bodyOutline.moveTo(cr, bodyT)
+                    bodyOutline.quadraticTo(0f, bodyT, 0f, bodyT + cr)
+                    bodyOutline.lineTo(0f, bodyB - cr)
+                    bodyOutline.quadraticTo(0f, bodyB, cr, bodyB)
+                    bodyOutline.lineTo(w - noseW, bodyB)
+                    bodyOutline.cubicTo(w - noseW * 0.35f, bodyB, w, bodyB - bodyH * 0.17f, w, bodyT + bodyH * 0.5f)
+                    bodyOutline.cubicTo(w, bodyT + bodyH * 0.17f, w - noseW * 0.35f, bodyT, w - noseW, bodyT)
+                    bodyOutline.close()
+                }
 
-            val wR     = h * 0.088f
-            val wCY    = ucB + wR * 0.55f
-            val railY  = wCY + wR * 0.88f
+                // 1. Silver body (full nose outline)
+                drawPath(bodyOutline, vbSilver)
 
-            // ── Body fill ──────────────────────────────────────────────────
-            drawRoundRect(bodyBg, Offset(0f, bodyT), Size(w, bodyH), CornerRadius(cr))
+                // 2. Blue stripe — bottom 30%, follows the nose curve on the nose end
+                val stripeY   = bodyT + bodyH * 0.70f
+                val noseXStripe = noseW * 0.15f   // approx nose-curve x at stripeY
+                val bluePath = Path()
+                if (leftFace) {
+                    bluePath.moveTo(w, stripeY)
+                    bluePath.lineTo(w, bodyB - cr)
+                    bluePath.quadraticTo(w, bodyB, w - cr, bodyB)
+                    bluePath.lineTo(noseW, bodyB)
+                    bluePath.cubicTo(noseW * 0.30f, bodyB, noseW * 0.05f, bodyT + bodyH * 0.78f, noseXStripe, stripeY)
+                    bluePath.close()
+                } else {
+                    bluePath.moveTo(0f, stripeY)
+                    bluePath.lineTo(0f, bodyB - cr)
+                    bluePath.quadraticTo(0f, bodyB, cr, bodyB)
+                    bluePath.lineTo(w - noseW, bodyB)
+                    bluePath.cubicTo(w - noseW * 0.30f, bodyB, w - noseW * 0.05f, bodyT + bodyH * 0.78f, w - noseXStripe, stripeY)
+                    bluePath.close()
+                }
+                drawPath(bluePath, vbBlue)
 
-            // ── Windows ────────────────────────────────────────────────────
-            for (i in 0 until nWin) {
-                val wx = winPad + i * (winW + winGap)
-                drawRoundRect(winBg, Offset(wx, winY), Size(winW, winH), CornerRadius(winCR))
+                // Angled windshield glass at nose
+                val gpLeft = Path().apply {
+                    moveTo(noseW * 0.78f, bodyT + bodyH * 0.06f)
+                    lineTo(noseW * 0.10f, bodyT + bodyH * 0.22f)
+                    lineTo(noseW * 0.08f, bodyT + bodyH * 0.58f)
+                    lineTo(noseW * 0.76f, bodyT + bodyH * 0.58f)
+                    close()
+                }
+                val gpRight = Path().apply {
+                    moveTo(w - noseW * 0.78f, bodyT + bodyH * 0.06f)
+                    lineTo(w - noseW * 0.10f, bodyT + bodyH * 0.22f)
+                    lineTo(w - noseW * 0.08f, bodyT + bodyH * 0.58f)
+                    lineTo(w - noseW * 0.76f, bodyT + bodyH * 0.58f)
+                    close()
+                }
+                drawPath(if (leftFace) gpLeft else gpRight, vbGlass)
+
+                // Headlight in blue stripe zone
+                val hlX = if (leftFace) w * 0.03f else w - w * 0.03f
+                val hlY = bodyT + bodyH * 0.81f
+                drawCircle(Color(0xFFFFF9C4), w * 0.050f, Offset(hlX, hlY))
+                drawCircle(Color.White,       w * 0.028f, Offset(hlX, hlY))
+
+                // Undercarriage
+                val ucT = bodyB
+                val ucH = h * 0.08f
+                val ucB = ucT + ucH
+                drawRect(Color(0xFF37474F), Offset(0f, ucT), Size(w, ucH))
+
+                // 4 wheels
+                val wR    = h * 0.092f
+                val wCY   = ucB + wR * 0.52f
+                val railY = wCY + wR * 0.88f
+                val wXs   = listOf(w * 0.14f, w * 0.38f, w * 0.62f, w * 0.86f)
+                for (wx in wXs) {
+                    drawCircle(vbWheel,           wR,         Offset(wx, wCY))
+                    drawCircle(Color(0xFF78909C), wR * 0.40f, Offset(wx, wCY))
+                    drawCircle(vbWheel, wR, Offset(wx, wCY), style = Stroke(1.2f.dp.toPx()))
+                }
+                drawLine(Color(0xFF37474F), Offset(wXs[0], wCY), Offset(wXs.last(), wCY), 2.dp.toPx())
+                drawLine(railC, Offset(0f, railY), Offset(w, railY), 1.5f.dp.toPx())
+
+            } else {
+                // ── Regular coach drawing ──────────────────────────────────
+                val bodyH  = h * 0.62f
+                val bodyT  = 0f
+                val bodyB  = bodyT + bodyH
+
+                val nWin   = if (coach.kind == CoachKind.POWER) 3 else 4
+                val winPad = 7.dp.toPx()
+                val winGap = 4.dp.toPx()
+                val winW   = (w - 2 * winPad - (nWin - 1) * winGap) / nWin
+                val winH   = bodyH * 0.30f
+                val winY   = bodyT + bodyH * 0.10f
+                val winCR  = 2.5f.dp.toPx()
+
+                val ucH    = h * 0.085f
+                val ucT    = bodyB
+                val ucB    = ucT + ucH
+                val wR     = h * 0.088f
+                val wCY    = ucB + wR * 0.55f
+                val railY  = wCY + wR * 0.88f
+
+                drawRoundRect(bodyBg, Offset(0f, bodyT), Size(w, bodyH), CornerRadius(cr))
+
+                for (i in 0 until nWin) {
+                    val wx = winPad + i * (winW + winGap)
+                    drawRoundRect(winBg, Offset(wx, winY), Size(winW, winH), CornerRadius(winCR))
+                }
+
+                val s1Y = bodyT + bodyH * 0.52f
+                val s2Y = bodyT + bodyH * 0.60f
+                val sH2 = bodyH * 0.065f
+                drawRect(stripe1, Offset(cr * 0.5f, s1Y), Size(w - cr, sH2))
+                drawRect(stripe2, Offset(cr * 0.5f, s2Y), Size(w - cr, sH2))
+
+                if (coach.highlighted) {
+                    drawRoundRect(
+                        color        = AppOrange,
+                        topLeft      = Offset(0f, bodyT),
+                        size         = Size(w, bodyH),
+                        cornerRadius = CornerRadius(cr),
+                        style        = Stroke(2.2f.dp.toPx())
+                    )
+                }
+
+                drawRect(underBg, Offset(cr * 0.5f, ucT), Size(w - cr, ucH))
+
+                val wxL = w * 0.24f
+                val wxR = w * 0.76f
+                for (wxPos in listOf(wxL, wxR)) {
+                    drawCircle(wheelBg,             wR,         Offset(wxPos, wCY))
+                    drawCircle(wheelBg.copy(0.55f), wR * 0.40f, Offset(wxPos, wCY))
+                    drawCircle(wheelBg.copy(0.85f), wR,         Offset(wxPos, wCY), style = Stroke(0.8f.dp.toPx()))
+                }
+                drawLine(underBg, Offset(wxL + wR * 0.4f, wCY), Offset(wxR - wR * 0.4f, wCY), 2.dp.toPx())
+                drawLine(railC, Offset(0f, railY), Offset(w, railY), 1.5f.dp.toPx())
             }
-
-            // ── Mid stripes ────────────────────────────────────────────────
-            val s1Y = bodyT + bodyH * 0.52f
-            val s2Y = bodyT + bodyH * 0.60f
-            val sH2 = bodyH * 0.065f
-            drawRect(stripe1, Offset(cr * 0.5f, s1Y), Size(w - cr, sH2))
-            drawRect(stripe2, Offset(cr * 0.5f, s2Y), Size(w - cr, sH2))
-
-            // ── Orange border on highlighted coach ─────────────────────────
-            if (coach.highlighted) {
-                drawRoundRect(
-                    color       = AppOrange,
-                    topLeft     = Offset(0f, bodyT),
-                    size        = Size(w, bodyH),
-                    cornerRadius = CornerRadius(cr),
-                    style       = Stroke(2.2f.dp.toPx())
-                )
-            }
-
-            // ── Undercarriage sill ─────────────────────────────────────────
-            drawRect(underBg, Offset(cr * 0.5f, ucT), Size(w - cr, ucH))
-
-            // ── Wheels ─────────────────────────────────────────────────────
-            val wxL = w * 0.24f
-            val wxR = w * 0.76f
-            for (wxPos in listOf(wxL, wxR)) {
-                drawCircle(wheelBg,               wR,          Offset(wxPos, wCY))
-                drawCircle(wheelBg.copy(0.55f),   wR * 0.40f,  Offset(wxPos, wCY))
-                drawCircle(wheelBg.copy(0.85f),   wR,          Offset(wxPos, wCY), style = Stroke(0.8f.dp.toPx()))
-            }
-
-            // ── Axle connecting line ───────────────────────────────────────
-            drawLine(underBg, Offset(wxL + wR * 0.4f, wCY), Offset(wxR - wR * 0.4f, wCY), 2.dp.toPx())
-
-            // ── Rail ───────────────────────────────────────────────────────
-            drawLine(railC, Offset(0f, railY), Offset(w, railY), 1.5f.dp.toPx())
         }
 
         Spacer(Modifier.height(5.dp))
@@ -1640,7 +1737,7 @@ fun PNRStatusCard(
                 Spacer(Modifier.height(14.dp))
 
                 // Train name + meta
-                Text(pnr.trainName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                Text(pnr.trainName.localTrainName(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(
                     verticalAlignment     = Alignment.CenterVertically,
@@ -1923,7 +2020,7 @@ fun TrainResultCard(train: Train, onTap: () -> Unit = {}) {
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(train.name, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1565C0), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(train.name.localTrainName(), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1565C0), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (train.source.isNotEmpty() && train.destination.isNotEmpty()) {
                     Text("${train.source} → ${train.destination}", fontSize = 12.sp, color = Zinc500)
                 }
@@ -1965,7 +2062,7 @@ private fun RouteDetailView(
                 }
                 Spacer(Modifier.width(4.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(train.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(train.name.localTrainName(), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${train.number}  ·  ${train.source.ifBlank { "–" }} → ${train.destination.ifBlank { "–" }}", fontSize = 12.sp, color = AppMuted)
                 }
             }
@@ -2284,7 +2381,7 @@ private fun PNRBasicCard(
                 verticalAlignment     = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(pnr.trainName.ifBlank { pnr.trainNumber }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTitle)
+                    Text(pnr.trainName.ifBlank { pnr.trainNumber }.localTrainName(), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTitle)
                     Text("${s.pnrLabel} ${pnr.pnrNumber}", fontSize = 11.sp, color = AppMuted)
                 }
                 val statusColor = when {
@@ -2419,7 +2516,7 @@ private fun ProLockedCard(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun StationSuggestionsCard(
+fun StationSuggestionsCard(
     suggestions: List<StationInfo>,
     onSelect:    (StationInfo) -> Unit,
     modifier:    Modifier = Modifier
@@ -2560,7 +2657,7 @@ private fun StationTrainRow(train: LiveTrainEntry, onTap: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    train.name,
+                    train.name.localTrainName(),
                     fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0),
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)

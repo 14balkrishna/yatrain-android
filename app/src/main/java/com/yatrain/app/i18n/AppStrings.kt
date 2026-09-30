@@ -3,6 +3,9 @@ package com.yatrain.app.i18n
 import androidx.compose.runtime.compositionLocalOf
 
 data class AppStrings(
+    // ── Language code ─────────────────────────────────────────────────────
+    val langCode: String = "en",
+
     // ── Navigation tabs ───────────────────────────────────────────────────
     val tabStation: String,
     val tabTrack: String,
