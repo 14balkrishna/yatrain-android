@@ -819,25 +819,26 @@ private fun LiveStatusCard(
                     onClick = { showLiveMap = true },
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(14.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = AppOrange)
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = AppOrange,
+                        contentColor   = Color.White
+                    )
                 ) {
                     Icon(
                         Icons.Outlined.Map,
                         null, modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(sLsc.openLiveMap, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(sLsc.openLiveMap, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
                 }
                 OutlinedButton(
                     onClick  = onSaveTrain,
+                    enabled  = isPro,
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(14.dp),
                     colors   = ButtonDefaults.outlinedButtonColors(
-                        contentColor = when {
-                            !isPro       -> AppMuted
-                            isSaved      -> AppOrange
-                            else         -> AppNavy
-                        }
+                        contentColor         = if (isSaved) AppOrange else AppNavy,
+                        disabledContentColor = AppMuted
                     ),
                     border   = BorderStroke(1.dp, when {
                         !isPro  -> AppBorder
@@ -846,21 +847,13 @@ private fun LiveStatusCard(
                     })
                 ) {
                     Icon(
-                        when {
-                            !isPro  -> Icons.Outlined.Lock
-                            isSaved -> Icons.Outlined.Bookmark
-                            else    -> Icons.Outlined.BookmarkBorder
-                        },
+                        if (isSaved) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,
                         null, modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        when {
-                            !isPro  -> LocalStrings.current.proSaveTrain
-                            isSaved -> sLsc.savedLabel
-                            else    -> sLsc.saveTrain
-                        },
-                        fontWeight = FontWeight.SemiBold, fontSize = 13.sp
+                        if (isSaved) sLsc.savedLabel else sLsc.saveTrain,
+                        fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1
                     )
                 }
             }
