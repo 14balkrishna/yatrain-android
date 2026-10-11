@@ -120,6 +120,10 @@ dependencies {
     implementation(libs.play.services.maps)
     implementation(libs.maps.compose)
 
+    // ML Kit on-device translation (free, offline after first model download)
+    implementation(libs.mlkit.translate)
+    implementation(libs.kotlinx.coroutines.play.services)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

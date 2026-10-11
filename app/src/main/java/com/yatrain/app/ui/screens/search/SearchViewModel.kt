@@ -29,6 +29,8 @@ import com.yatrain.app.ui.screens.track.StationInfo
 import com.yatrain.app.ui.screens.track.TrainRef
 import com.yatrain.app.ui.screens.track.allStationsForSearch
 import com.yatrain.app.ui.screens.track.searchTrainsByName
+import com.yatrain.app.i18n.MlKitTranslator
+import com.yatrain.app.i18n.withTranslatedNames
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -250,21 +252,26 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             isPNR(trimmed) -> {
                 _results.value = emptyList()
                 _isTicketSaved.value = false
-                api.getPNRStatus(trimmed)
-                    .onSuccess {
-                        _pnrResult.value = it
-                        _isTicketSaved.value = repo.isTicketSaved(userId(), it.pnrNumber)
-                    }
-                    .onFailure { _error.value = "PNR not found — check the number and try again." }
+                val pnrR = api.getPNRStatus(trimmed)
+                val pnr  = pnrR.getOrNull()
+                if (pnr != null) {
+                    _pnrResult.value = pnr.withTranslatedNames()
+                    _isTicketSaved.value = repo.isTicketSaved(userId(), pnr.pnrNumber)
+                } else {
+                    _error.value = "PNR not found — check the number and try again."
+                }
             }
             isTrainNumber(trimmed) -> {
                 _pnrResult.value = null
-                api.searchTrains(trimmed)
-                    .onSuccess { trains ->
-                        _results.value = trains
-                        trains.firstOrNull()?.let { loadScheduleFor(it) }
-                    }
-                    .onFailure { _error.value = "Train \"$trimmed\" not found." }
+                val trainR = api.searchTrains(trimmed)
+                val trains = trainR.getOrNull()
+                if (trains != null) {
+                    val translated = trains.withTranslatedNames()
+                    _results.value = translated
+                    translated.firstOrNull()?.let { loadScheduleFor(it) }
+                } else {
+                    _error.value = "Train \"$trimmed\" not found."
+                }
             }
             else -> {
                 _pnrResult.value = null; _results.value = emptyList()
@@ -313,26 +320,29 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _stationTrainsLoading.value = true
             withTimeoutOrNull(15_000L) {
-                api.getStationTrains(station.code)
-                    .onSuccess { trains ->
-                        _stationTrains.value = trains.map { t ->
-                            val dep = t.departure.replace(".", ":").ifBlank { "Last" }
-                            val arr = t.arrival.replace(".", ":").ifBlank { "First" }
-                            LiveTrainEntry(
-                                number    = t.number,
-                                name      = t.name,
-                                fromCode  = "",
-                                fromName  = t.source,
-                                toCode    = "",
-                                toName    = t.destination,
-                                arrival   = arr,
-                                departure = dep,
-                                platform  = t.platform.ifBlank { "–" },
-                                delayMin  = t.delayMinutes
-                            )
-                        }
+                val r = api.getStationTrains(station.code)
+                val trains = r.getOrNull()
+                if (trains != null) {
+                    val mapped = trains.map { t ->
+                        val dep = t.departure.replace(".", ":").ifBlank { "Last" }
+                        val arr = t.arrival.replace(".", ":").ifBlank { "First" }
+                        LiveTrainEntry(
+                            number    = t.number,
+                            name      = t.name,
+                            fromCode  = "",
+                            fromName  = t.source,
+                            toCode    = "",
+                            toName    = t.destination,
+                            arrival   = arr,
+                            departure = dep,
+                            platform  = t.platform.ifBlank { "–" },
+                            delayMin  = t.delayMinutes
+                        )
                     }
-                    .onFailure { e -> _error.value = e.message ?: "Could not load trains for ${station.name}." }
+                    _stationTrains.value = mapped.withTranslatedNames()
+                } else {
+                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains for ${station.name}."
+                }
             }
             _stationTrainsLoading.value = false
         }
@@ -390,13 +400,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadScheduleFor(train: Train) {
         _scheduleLoading.value = true
-        api.getSchedule(train.number)
-            .onSuccess { ts ->
-                _schedule.value = ts.route
-                _currentStopIndex.value = computeCurrentStop(ts.route)
-                _selectedTrain.value = train
-            }
-            .onFailure { _schedule.value = emptyList() }
+        val r  = api.getSchedule(train.number)
+        val ts = r.getOrNull()
+        if (ts != null) {
+            val translated = ts.route.withTranslatedNames()
+            _schedule.value        = translated
+            _currentStopIndex.value = computeCurrentStop(translated)
+            _selectedTrain.value   = train
+        } else {
+            _schedule.value = emptyList()
+        }
         _scheduleLoading.value = false
     }
 

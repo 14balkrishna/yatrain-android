@@ -27,6 +27,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import com.yatrain.app.services.SavedDataRepository
 import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
+import com.yatrain.app.i18n.MlKitTranslator
+import com.yatrain.app.i18n.withTranslatedNames
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -125,9 +127,13 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _error.value = null
         viewModelScope.launch {
             withTimeoutOrNull(15_000L) {
-                api.getStationTrains(station.code)
-                    .onSuccess { trains -> _liveTrains.value = trains.map { mapApiTrain(it) } }
-                    .onFailure { e -> _error.value = e.message ?: "Could not load trains. Check your connection." }
+                val r = api.getStationTrains(station.code)
+                val trains = r.getOrNull()
+                if (trains != null) {
+                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                } else {
+                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains. Check your connection."
+                }
             }
             _isLocating.value = false
         }
@@ -156,11 +162,13 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _isLocating.value = true
             withTimeoutOrNull(15_000L) {
-                api.getStationTrains(station.code)
-                    .onSuccess { trains ->
-                        if (trains.isNotEmpty()) _liveTrains.value = trains.map { mapApiTrain(it) }
-                    }
-                    .onFailure { e -> _error.value = e.message ?: "Could not load trains. Check your connection." }
+                val r = api.getStationTrains(station.code)
+                val trains = r.getOrNull()
+                if (trains != null && trains.isNotEmpty()) {
+                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                } else if (trains == null) {
+                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains. Check your connection."
+                }
             }
             _isLocating.value = false
         }
@@ -243,11 +251,13 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _liveTrains.value = emptyList()
         viewModelScope.launch {
             withTimeoutOrNull(15_000L) {
-                api.getStationTrains(station.code)
-                    .onSuccess { trains ->
-                        if (trains.isNotEmpty()) _liveTrains.value = trains.map { mapApiTrain(it) }
-                    }
-                    .onFailure { e -> _error.value = e.message ?: "Could not load trains for ${station.name}." }
+                val r = api.getStationTrains(station.code)
+                val trains = r.getOrNull()
+                if (trains != null && trains.isNotEmpty()) {
+                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                } else if (trains == null) {
+                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains for ${station.name}."
+                }
             }
             _isLocating.value = false
         }
@@ -280,16 +290,26 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         }
         _isLoading.value = true; _error.value = null; _trainResult.value = null; _schedule.value = emptyList()
 
-        api.searchTrains(trainNumber)
-            .onSuccess { _trainResult.value = it.firstOrNull() }
-            .onFailure { _error.value = "Train \"$trainNumber\" not found." }
+        val searchR = api.searchTrains(trainNumber)
+        val firstTrain = searchR.getOrNull()?.firstOrNull()
+        if (firstTrain != null) {
+            _trainResult.value = firstTrain.copy(
+                name        = MlKitTranslator.translate(firstTrain.name),
+                source      = MlKitTranslator.translate(firstTrain.source),
+                destination = MlKitTranslator.translate(firstTrain.destination)
+            )
+        } else {
+            _error.value = searchR.exceptionOrNull()?.message ?: "Train \"$trainNumber\" not found."
+        }
 
         if (_trainResult.value != null) {
-            api.getSchedule(trainNumber)
-                .onSuccess {
-                    _schedule.value = it.route
-                    _currentStopIndex.value = computeCurrentStop(it.route)
-                }
+            val schedR = api.getSchedule(trainNumber)
+            val ts = schedR.getOrNull()
+            if (ts != null) {
+                val translated = ts.route.withTranslatedNames()
+                _schedule.value = translated
+                _currentStopIndex.value = computeCurrentStop(translated)
+            }
             _isTrainSaved.value = repo.isTrainSaved(userId(), trainNumber)
         }
         _isLoading.value = false

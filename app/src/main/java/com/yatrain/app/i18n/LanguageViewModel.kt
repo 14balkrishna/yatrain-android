@@ -20,11 +20,17 @@ class LanguageViewModel(app: Application) : AndroidViewModel(app) {
     private val _languageCode = MutableStateFlow("en")
     val languageCode: StateFlow<String> = _languageCode.asStateFlow()
 
+    /** Mirrors MlKitTranslator.state so any composable can observe download progress. */
+    val translatorState: StateFlow<MlKitTranslator.State> = MlKitTranslator.state
+
     init {
         viewModelScope.launch {
             app.dataStore.data
                 .map { it[KEY_LANGUAGE] ?: "en" }
-                .collect { code -> _languageCode.value = code }
+                .collect { code ->
+                    _languageCode.value = code
+                    MlKitTranslator.prepare(code)   // download model on startup if needed
+                }
         }
     }
 
@@ -34,6 +40,7 @@ class LanguageViewModel(app: Application) : AndroidViewModel(app) {
             getApplication<Application>().dataStore.edit { prefs ->
                 prefs[KEY_LANGUAGE] = code
             }
+            MlKitTranslator.prepare(code)           // download model when user picks a language
         }
     }
 }

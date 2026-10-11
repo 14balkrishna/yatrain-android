@@ -9,6 +9,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.yatrain.app.i18n.LocalStrings
 import com.yatrain.app.i18n.Language
+import com.yatrain.app.i18n.MlKitTranslator
 import com.yatrain.app.i18n.supportedLanguages
 import com.yatrain.app.ui.theme.AppBorder
 import com.yatrain.app.ui.theme.AppCard
@@ -34,6 +37,7 @@ fun LanguagePickerDialog(
     onDismiss: () -> Unit
 ) {
     val strings = LocalStrings.current
+    val translatorState by MlKitTranslator.state.collectAsState()
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -128,6 +132,38 @@ fun LanguagePickerDialog(
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
                     }
+                }
+
+                // Download progress banner — visible only while the ML Kit model downloads
+                if (translatorState is MlKitTranslator.State.Downloading) {
+                    HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AppOrange.copy(alpha = 0.08f))
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier  = Modifier.size(14.dp),
+                            color     = AppOrange,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Downloading language pack…",
+                            fontSize = 12.sp,
+                            color    = AppOrange
+                        )
+                    }
+                } else if (translatorState is MlKitTranslator.State.Failed) {
+                    HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
+                    Text(
+                        "Translation unavailable — check your connection.",
+                        fontSize = 11.sp,
+                        color    = AppMuted,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
                 }
 
                 Spacer(Modifier.height(8.dp))
