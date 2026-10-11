@@ -21,6 +21,9 @@ import com.yatrain.app.models.SavedTrain
 import com.yatrain.app.models.Station
 import com.yatrain.app.models.Train
 import com.yatrain.app.ui.screens.track.allStationsForSearch
+import com.yatrain.app.ui.screens.track.TrainRef
+import com.yatrain.app.ui.screens.track.searchTrainsByName
+import kotlinx.coroutines.withTimeoutOrNull
 import com.yatrain.app.services.SavedDataRepository
 import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
@@ -75,6 +78,9 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
     private val _stationSuggestions = MutableStateFlow<List<StationInfo>>(emptyList())
     val stationSuggestions: StateFlow<List<StationInfo>> = _stationSuggestions.asStateFlow()
 
+    private val _trainSuggestions = MutableStateFlow<List<TrainRef>>(emptyList())
+    val trainSuggestions: StateFlow<List<TrainRef>> = _trainSuggestions.asStateFlow()
+
     // ── Alert state ───────────────────────────────────────────────────────────
 
     private val _alertedStations = MutableStateFlow<Set<String>>(emptySet())
@@ -113,23 +119,64 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
     fun onLocationResult(lat: Double, lng: Double) {
         val station = nearestStation(lat, lng) ?: return
         _showingPopularTrains.value = false
+        _isLocating.value = true       // set before detectedStation so the spinner never flashes "no trains"
         _detectedStation.value = station
-        _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
-        _isLocating.value = false
-    }
-
-    /** Call before tryGetLocation() so the spinner appears immediately. */
-    fun startLocating() { _isLocating.value = true }
-
-    /** Called by the "Live Trains" button — shows spinner then reloads the schedule. */
-    fun refreshLiveTrains() {
-        val station = _detectedStation.value ?: return
+        _liveTrains.value = emptyList()
+        _error.value = null
         viewModelScope.launch {
-            _isLocating.value = true
-            kotlinx.coroutines.delay(600)
-            _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
+            withTimeoutOrNull(15_000L) {
+                api.getStationTrains(station.code)
+                    .onSuccess { trains -> _liveTrains.value = trains.map { mapApiTrain(it) } }
+                    .onFailure { e -> _error.value = e.message ?: "Could not load trains. Check your connection." }
+            }
             _isLocating.value = false
         }
+    }
+
+    /** Call before tryGetLocation() so the spinner appears immediately.
+     *  Auto-cancels the spinner after 20 s if no location fix arrives (Samsung / no-GPS). */
+    fun startLocating() {
+        _isLocating.value = true
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(20_000L)
+            // Only clear the spinner if still locating with no station found yet
+            if (_isLocating.value && _detectedStation.value == null) {
+                _isLocating.value = false
+            }
+        }
+    }
+
+    /** Called when the platform cannot provide a location fix (providers disabled / permission denied). */
+    fun stopLocating() { _isLocating.value = false }
+
+    /** Called by the "Live Trains" button — fetches fresh data from the API. */
+    fun refreshLiveTrains() {
+        val station = _detectedStation.value ?: return
+        _error.value = null
+        viewModelScope.launch {
+            _isLocating.value = true
+            withTimeoutOrNull(15_000L) {
+                api.getStationTrains(station.code)
+                    .onSuccess { trains ->
+                        if (trains.isNotEmpty()) _liveTrains.value = trains.map { mapApiTrain(it) }
+                    }
+                    .onFailure { e -> _error.value = e.message ?: "Could not load trains. Check your connection." }
+            }
+            _isLocating.value = false
+        }
+    }
+
+    private fun mapApiTrain(t: com.yatrain.app.models.StationTrain): LiveTrainEntry {
+        val dep = t.departure.orEmpty().replace(".", ":").ifBlank { "Last" }
+        val arr = t.arrival.orEmpty().replace(".", ":").ifBlank { "First" }
+        return LiveTrainEntry(
+            number   = t.number.orEmpty(),  name     = t.name.orEmpty(),
+            fromCode = "",                  fromName = t.source.orEmpty(),
+            toCode   = "",                  toName   = t.destination.orEmpty(),
+            arrival  = arr,                 departure = dep,
+            platform = t.platform.orEmpty().ifBlank { "–" },
+            delayMin = t.delayMinutes
+        )
     }
 
     /**
@@ -161,27 +208,28 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         searchJob?.cancel()
         val trimmed = newQuery.trim()
 
-        // Station name typeahead — trigger when user types letters
         if (trimmed.any { it.isLetter() }) {
-            if (trimmed.length >= 3) {
-                val q = trimmed.lowercase()
+            val q = trimmed.lowercase()
+            if (trimmed.length >= 2) {
                 _stationSuggestions.value = allStationsForSearch.filter { s ->
                     s.name.lowercase().contains(q) ||
                     s.city.lowercase().contains(q) ||
                     s.code.lowercase().startsWith(q)
-                }.take(8)
+                }.take(5)
+                _trainSuggestions.value = searchTrainsByName(trimmed)
             } else {
                 _stationSuggestions.value = emptyList()
+                _trainSuggestions.value = emptyList()
             }
             _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
             return
         }
 
         _stationSuggestions.value = emptyList()
+        _trainSuggestions.value = emptyList()
         if (trimmed.length < 4) {
             _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
         }
-        // No auto-search on keystroke — search fires only on explicit search() call
     }
 
     fun onStationSelected(station: StationInfo) {
@@ -190,8 +238,28 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _stationSuggestions.value = emptyList()
         _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
         _showingPopularTrains.value = false
+        _isLocating.value = true
         _detectedStation.value = station
-        _liveTrains.value = stationSchedule(station.code).sortedBy { sortKey(it) }
+        _liveTrains.value = emptyList()
+        viewModelScope.launch {
+            withTimeoutOrNull(15_000L) {
+                api.getStationTrains(station.code)
+                    .onSuccess { trains ->
+                        if (trains.isNotEmpty()) _liveTrains.value = trains.map { mapApiTrain(it) }
+                    }
+                    .onFailure { e -> _error.value = e.message ?: "Could not load trains for ${station.name}." }
+            }
+            _isLocating.value = false
+        }
+    }
+
+    fun onTrainSuggestionSelected(train: TrainRef) {
+        searchJob?.cancel()
+        _query.value = train.number
+        _stationSuggestions.value = emptyList()
+        _trainSuggestions.value = emptyList()
+        _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
+        searchJob = viewModelScope.launch { fetch(train.number) }
     }
 
     fun search() {
@@ -231,6 +299,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _query.value = ""; _trainResult.value = null; _schedule.value = emptyList()
         _error.value = null; _alertedStations.value = emptySet(); _currentStopIndex.value = 0
         _isTrainSaved.value = false; _pnrContext.value = null
+        _stationSuggestions.value = emptyList(); _trainSuggestions.value = emptyList()
     }
 
     fun toggleSaveTrain() {
@@ -432,7 +501,6 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
             }
             cal.timeInMillis
         } catch (_: Exception) {
-            // Demo fallback: fire 60 seconds from now so the user can see it work
             System.currentTimeMillis() + 60_000L
         }
     }

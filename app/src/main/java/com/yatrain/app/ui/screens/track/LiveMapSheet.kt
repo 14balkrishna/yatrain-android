@@ -3,7 +3,6 @@ package com.yatrain.app.ui.screens.track
 import android.content.Intent
 import android.net.Uri
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -222,6 +221,51 @@ private fun upcomingStationBitmap(alerted: Boolean): Bitmap {
     return bmp
 }
 
+// ── Train marker bitmap (drawn programmatically so centre is exact) ───────────
+// Front (nose) at TOP of image. Anchor (0.5f, 0.5f) = bitmap centre = geographic position.
+// This guarantees the train sits ON the polyline at every zoom level regardless of PNG padding.
+private fun trainMarkerBitmap(): Bitmap {
+    val w = 30; val h = 80
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val cv  = Canvas(bmp)
+    val p   = Paint(Paint.ANTI_ALIAS_FLAG)
+    val pad = 2f; val cr = 6f
+
+    // White body
+    p.color = android.graphics.Color.WHITE; p.style = Paint.Style.FILL
+    cv.drawRoundRect(RectF(pad, pad, w - pad, h - pad), cr, cr, p)
+
+    // Orange nose band at top
+    p.color = android.graphics.Color.rgb(255, 107, 0)
+    cv.drawRoundRect(RectF(pad, pad, w - pad, pad + 13f), cr, cr, p)
+    p.color = android.graphics.Color.WHITE   // cut straight bottom edge of orange band
+    cv.drawRect(pad, pad + 7f, w - pad, pad + 13f, p)
+
+    // Coach separator at midpoint
+    p.color = android.graphics.Color.rgb(200, 200, 200)
+    p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f
+    cv.drawLine(pad + 1f, h / 2f, w - pad - 1f, h / 2f, p)
+
+    // Windows — 2 per coach on each side
+    p.color = android.graphics.Color.rgb(120, 170, 225); p.style = Paint.Style.FILL
+    val wW = w * 0.26f; val wH = 5.5f; val wCr = 2f
+    for (wy in listOf(h * 0.21f, h * 0.33f))  {          // upper coach
+        cv.drawRoundRect(RectF(pad + 2f, wy, pad + 2f + wW, wy + wH), wCr, wCr, p)
+        cv.drawRoundRect(RectF(w - pad - 2f - wW, wy, w - pad - 2f, wy + wH), wCr, wCr, p)
+    }
+    for (wy in listOf(h * 0.58f, h * 0.70f)) {           // lower coach
+        cv.drawRoundRect(RectF(pad + 2f, wy, pad + 2f + wW, wy + wH), wCr, wCr, p)
+        cv.drawRoundRect(RectF(w - pad - 2f - wW, wy, w - pad - 2f, wy + wH), wCr, wCr, p)
+    }
+
+    // Outline
+    p.color = android.graphics.Color.rgb(90, 90, 90)
+    p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f
+    cv.drawRoundRect(RectF(pad, pad, w - pad, h - pad), cr, cr, p)
+
+    return bmp
+}
+
 // ── Share ─────────────────────────────────────────────────────────────────────
 
 private fun buildShareText(
@@ -325,6 +369,14 @@ fun LiveMapSheet(
     val currentIcon = currentIconState.value
     val bellIcon    = bellIconState.value
     val alertedIcon = alertedIconState.value
+
+    // ── Progress split for two-colour polyline ────────────────────────────────
+    // Quantise to 0.2% steps so we don't create new LatLng lists at 60 fps.
+    val splitT by remember { derivedStateOf { (animTState.value * 500).toLong() / 500.0 } }
+    val (passedCoords, upcomingCoords) = remember(splitT, coords) {
+        if (coords.size >= 2) splitAt(coords, seg, total, splitT)
+        else Pair(emptyList<LatLng>(), coords)
+    }
 
     // ── Animation loop + camera follow (single coroutine) ────────────────────
     LaunchedEffect(coords) {
@@ -431,11 +483,8 @@ fun LiveMapSheet(
                     MapEffect(Unit) { _ ->
                         if (trainIconState.value == null) {
                             try {
-                                // Load top-down train PNG and scale to map marker size (keep aspect ratio 98:648 ≈ 1:6.6)
-                                val raw = BitmapFactory.decodeResource(context.resources, R.drawable.ic_train_top)
-                                val markerW = 36; val markerH = (markerW * raw.height.toFloat() / raw.width).toInt()
-                                val scaled = Bitmap.createScaledBitmap(raw, markerW, markerH, true)
-                                trainIconState.value = BitmapDescriptorFactory.fromBitmap(scaled)
+                                // Programmatic bitmap — body precisely centred so (0.5f,0.5f) anchor sits on the polyline
+                                trainIconState.value = BitmapDescriptorFactory.fromBitmap(trainMarkerBitmap())
                             } catch (_: Exception) {}
                             try { passedIconState.value  = BitmapDescriptorFactory.fromBitmap(endpointDotBitmap(android.graphics.Color.rgb(160, 160, 160))) } catch (_: Exception) {}
                             try { currentIconState.value = BitmapDescriptorFactory.fromBitmap(endpointDotBitmap(android.graphics.Color.rgb(255, 107, 0))) } catch (_: Exception) {}
@@ -444,9 +493,11 @@ fun LiveMapSheet(
                         }
                     }
 
-                    // Route polyline — solid bright blue, matches navigation style
-                    if (coords.size >= 2)
-                        Polyline(points = coords, color = Color(0xFF1E82FF), width = 14f, zIndex = 1f)
+                    // Route polyline — dark for completed journey, bright for remaining
+                    if (passedCoords.size >= 2)
+                        Polyline(points = passedCoords,   color = Color(0xFF1A4A8A), width = 14f, zIndex = 1f)
+                    if (upcomingCoords.size >= 2)
+                        Polyline(points = upcomingCoords, color = Color(0xFF4FAAFF), width = 14f, zIndex = 1f)
 
                     // Station markers — only key stops to keep map uncluttered
                     if (passedIcon != null && currentIcon != null && bellIcon != null && alertedIcon != null) {

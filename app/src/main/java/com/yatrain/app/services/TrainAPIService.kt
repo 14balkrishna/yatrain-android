@@ -1,5 +1,12 @@
 package com.yatrain.app.services
 
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.TypeAdapter
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import com.google.gson.stream.JsonWriter
 import com.yatrain.app.BuildConfig
 import com.yatrain.app.models.*
 import retrofit2.http.Query
@@ -8,6 +15,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
+import java.util.concurrent.TimeUnit
 
 // Real endpoints verified against irctc-indian-railway-pnr-status.p.rapidapi.com:
 //   GET /train/{trainNumber}      → single train info
@@ -48,14 +56,14 @@ interface IRCTCApi {
         @Query("limit")             limit: Int = 20,
         @Header("X-RapidAPI-Key")   apiKey: String = BuildConfig.RAPIDAPI_KEY,
         @Header("X-RapidAPI-Host")  host: String   = IRCTC_HOST
-    ): ApiResponse<StationAutocompleteData>
+    ): ApiResponse<JsonElement>
 
     @GET("station/{code}/trains")
     suspend fun getStationTrains(
         @Path("code")               code: String,
         @Header("X-RapidAPI-Key")   apiKey: String = BuildConfig.RAPIDAPI_KEY,
         @Header("X-RapidAPI-Host")  host: String   = IRCTC_HOST
-    ): ApiResponse<StationTrainsData>
+    ): ApiResponse<JsonElement>
 }
 
 interface RailRadarApi {
@@ -66,9 +74,30 @@ interface RailRadarApi {
     ): LiveStatus
 }
 
+// TypeAdapter (not JsonDeserializer) so null JSON values are also handled —
+// JsonDeserializer is bypassed by Gson for null, TypeAdapter.read() is always called.
+private class LenientStringAdapter : TypeAdapter<String>() {
+    override fun write(out: JsonWriter, value: String?) {
+        if (value == null) out.nullValue() else out.value(value)
+    }
+    override fun read(`in`: JsonReader): String = when (`in`.peek()) {
+        JsonToken.NULL -> { `in`.nextNull(); "" }
+        JsonToken.BEGIN_OBJECT, JsonToken.BEGIN_ARRAY -> { `in`.skipValue(); "" }
+        else -> `in`.nextString()   // handles STRING, NUMBER, BOOLEAN
+    }
+}
+
 class TrainAPIService {
 
+    private val gson = GsonBuilder()
+        .registerTypeAdapter(String::class.java, LenientStringAdapter())
+        .create()
+
     private val okHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
         .addInterceptor(HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG)
                 HttpLoggingInterceptor.Level.BODY
@@ -80,7 +109,7 @@ class TrainAPIService {
     private val irctcApi: IRCTCApi = Retrofit.Builder()
         .baseUrl(IRCTC_BASE)
         .client(okHttpClient)
-        .addConverterFactory(GsonConverterFactory.create())
+        .addConverterFactory(GsonConverterFactory.create(gson))
         .build()
         .create(IRCTCApi::class.java)
 
@@ -114,15 +143,49 @@ class TrainAPIService {
 
     suspend fun autocompleteStation(query: String): Result<List<StationSearchResult>> = runCatching {
         val resp = irctcApi.autocompleteStation(query)
-        resp.data?.results ?: emptyList()
+        val element = resp.data ?: return@runCatching emptyList()
+        val arr = extractArray(element, "results", "stations", "data")
+        arr.mapNotNull { runCatching { gson.fromJson(it, StationSearchResult::class.java) }.getOrNull() }
     }
 
     suspend fun getStationTrains(code: String): Result<List<StationTrain>> = runCatching {
         val resp = irctcApi.getStationTrains(code)
-        val trains = resp.data?.trains ?: emptyList()
-        trains.sortedBy { t ->
-            val raw = if (t.departure.isNotBlank()) t.departure else t.arrival
-            raw.replace(".", ":")
+        val element = resp.data ?: return@runCatching emptyList()
+        // The API may return data as a direct array OR as an object with a trains/trainsList field
+        val arr = extractArray(element, "trains", "trainsList", "train_list", "data", "stationTrains")
+        arr.mapNotNull { runCatching { gson.fromJson(it, StationTrain::class.java) }.getOrNull() }
+            .filter { it.number.isNotBlank() }
+            .sortedBy { t ->
+                val dep = t.departure.orEmpty()
+                val arr2 = t.arrival.orEmpty()
+                val raw = if (dep.isNotBlank()) dep else arr2
+                raw.replace(".", ":")
+            }
+    }
+
+    /** Extracts a JsonArray from an element — either a direct array, or an object
+     *  containing an array under one of the given field names (tried in order).
+     *  Falls back to the first JsonArray-valued key in the object, so unknown
+     *  wrapper field names (e.g. API changes) are handled automatically. */
+    private fun extractArray(element: JsonElement, vararg fieldNames: String): JsonArray {
+        if (element.isJsonArray) return element.asJsonArray
+        if (element.isJsonObject) {
+            val obj = element.asJsonObject
+            // Try known names first
+            for (name in fieldNames) {
+                val child = obj.get(name) ?: continue
+                if (child.isJsonArray) return child.asJsonArray
+                // Also recurse one level in case it's { "data": { "trains": [...] } }
+                if (child.isJsonObject) {
+                    val inner = extractArray(child, *fieldNames)
+                    if (inner.size() > 0) return inner
+                }
+            }
+            // Last resort: return the first JsonArray value found in any key
+            for (entry in obj.entrySet()) {
+                if (entry.value.isJsonArray) return entry.value.asJsonArray
+            }
         }
+        return JsonArray()
     }
 }

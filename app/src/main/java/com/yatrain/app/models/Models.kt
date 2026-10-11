@@ -17,42 +17,67 @@ data class YatrainUser(
 // ── Train (matches GET /train/{number} → data field) ─────────────────────────
 
 data class Train(
-    @SerializedName("train_no")       val number: String,
-    @SerializedName("train_name")     val name: String,
-    @SerializedName("from_stn_name")  val source: String = "",
-    @SerializedName("from_stn_code")  val sourceCode: String = "",
-    @SerializedName("to_stn_name")    val destination: String = "",
-    @SerializedName("to_stn_code")    val destinationCode: String = "",
-    @SerializedName("from_time")      val departureTime: String = "",
-    @SerializedName("to_time")        val arrivalTime: String = "",
-    @SerializedName("travel_time")    val duration: String = "",
-    @SerializedName("distance_km")    val distance: String = "",
-    @SerializedName("runs_on")        val runsOn: List<String> = emptyList(),
-    @SerializedName("available_classes") val classes: List<String> = emptyList(),
+    @SerializedName(value = "train_no",    alternate = ["trainNo", "number", "train_number"])
+    val number: String,
+    @SerializedName(value = "train_name",  alternate = ["trainName", "name"])
+    val name: String,
+    @SerializedName(value = "from_stn_name", alternate = ["source", "fromStnName", "from_station_name", "from"])
+    val source: String = "",
+    @SerializedName(value = "from_stn_code", alternate = ["sourceCode", "fromStnCode", "from_station_code"])
+    val sourceCode: String = "",
+    @SerializedName(value = "to_stn_name",   alternate = ["destination", "toStnName", "to_station_name", "to"])
+    val destination: String = "",
+    @SerializedName(value = "to_stn_code",   alternate = ["destinationCode", "toStnCode", "to_station_code"])
+    val destinationCode: String = "",
+    @SerializedName(value = "from_time",   alternate = ["departureTime", "departure", "dep_time", "fromTime"])
+    val departureTime: String = "",
+    @SerializedName(value = "to_time",     alternate = ["arrivalTime", "arrival", "arr_time", "toTime"])
+    val arrivalTime: String = "",
+    @SerializedName(value = "travel_time", alternate = ["duration", "travelTime"])
+    val duration: String = "",
+    @SerializedName(value = "distance_km", alternate = ["distance"])
+    val distance: String = "",
+    @SerializedName(value = "runs_on",     alternate = ["runsOn"])
+    val runsOn: List<String> = emptyList(),
+    @SerializedName(value = "available_classes", alternate = ["classes", "availableClasses"])
+    val classes: List<String> = emptyList(),
     val type: String = ""
 )
 
 // ── Station (matches route items inside GET /schedule/{number}) ───────────────
 
 data class Station(
-    @SerializedName("station_code")  val code: String,
-    @SerializedName("station_name")  val name: String,
+    @SerializedName(value = "station_code", alternate = ["stationCode", "code", "stnCode"])
+    val code: String,
+    @SerializedName(value = "station_name", alternate = ["stationName", "name", "stnName"])
+    val name: String,
+    @SerializedName(value = "arrival",      alternate = ["arrivalTime", "arr_time", "arrTime", "scheduled_arrival"])
     val arrival: String = "",
+    @SerializedName(value = "departure",    alternate = ["departureTime", "dep_time", "depTime", "scheduled_departure"])
     val departure: String = "",
-    @SerializedName("halt_minutes")  val halt: Int = 0,
-    @SerializedName("distance_km")   val distance: String = "",
+    @SerializedName(value = "halt_minutes", alternate = ["halt", "haltMinutes", "haltDuration"])
+    val halt: Int = 0,
+    @SerializedName(value = "distance_km",  alternate = ["distance", "distanceKm"])
+    val distance: String = "",
     val platform: String = "",
+    @SerializedName(value = "day",          alternate = ["dayNo", "dayNumber"])
     val day: String = "1"
 )
 
 // ── Train Schedule (matches GET /schedule/{number} → data field) ──────────────
 
 data class TrainSchedule(
-    @SerializedName("train_no")       val trainNo: String,
-    @SerializedName("train_name")     val trainName: String,
-    @SerializedName("from_stn_code")  val fromCode: String = "",
-    @SerializedName("to_stn_code")    val toCode: String = "",
-    @SerializedName("total_stations") val totalStations: Int = 0,
+    @SerializedName(value = "train_no",        alternate = ["trainNo"])
+    val trainNo: String,
+    @SerializedName(value = "train_name",      alternate = ["trainName"])
+    val trainName: String,
+    @SerializedName(value = "from_stn_code",   alternate = ["fromCode"])
+    val fromCode: String = "",
+    @SerializedName(value = "to_stn_code",     alternate = ["toCode"])
+    val toCode: String = "",
+    @SerializedName(value = "total_stations",  alternate = ["totalStations"])
+    val totalStations: Int = 0,
+    @SerializedName(value = "route",           alternate = ["stationList", "stations", "station_list", "routeList"])
     val route: List<Station> = emptyList()
 )
 
@@ -195,39 +220,43 @@ data class SavedStationAlert(
 // ── Station Autocomplete (GET /autocomplete/station/{q}) ──────────────────────
 
 data class StationSearchResult(
-    @SerializedName("station_code") val code: String,
-    @SerializedName("station_name") val name: String
-)
-
-data class StationAutocompleteData(
-    val results: List<StationSearchResult> = emptyList()
+    @SerializedName(value = "station_code", alternate = ["code", "stationCode"])
+    val code: String,
+    @SerializedName(value = "station_name", alternate = ["name", "stationName"])
+    val name: String
 )
 
 // ── Station Trains (GET /station/{code}/trains) ────────────────────────────────
 
 data class StationTrain(
-    @SerializedName("train_no")           val number: String,
-    @SerializedName("train_name")         val name: String,
+    @SerializedName(value = "train_no",   alternate = ["trainNo", "number", "train_number"])
+    val number: String = "",
+    @SerializedName(value = "train_name", alternate = ["trainName", "name"])
+    val name: String = "",
     val type: String = "",
+    @SerializedName(value = "source",       alternate = ["from_stn_name", "from", "fromStnName", "from_station"])
     val source: String = "",
+    @SerializedName(value = "destination",  alternate = ["to_stn_name",   "to",   "toStnName",   "to_station"])
     val destination: String = "",
-    @SerializedName("scheduled_departure") val departure: String = "",
-    @SerializedName("scheduled_arrival")   val arrival: String = "",
+    @SerializedName(value = "scheduled_departure", alternate = ["departure", "dep_time", "departureTime", "from_time"])
+    val departure: String = "",
+    @SerializedName(value = "scheduled_arrival",   alternate = ["arrival",   "arr_time", "arrivalTime",   "to_time"])
+    val arrival: String = "",
     val platform: String = "",
-    @SerializedName("delay_minutes")       val delayMinutes: Int = 0,
+    @SerializedName(value = "delay_minutes", alternate = ["delay", "delayMinutes"])
+    val delayMinutes: Int = 0,
     val status: String = "",
-    @SerializedName("originates_here")     val originatesHere: Boolean = false,
-    @SerializedName("terminates_here")     val terminatesHere: Boolean = false
+    @SerializedName(value = "originates_here", alternate = ["originatesHere"])
+    val originatesHere: Boolean = false,
+    @SerializedName(value = "terminates_here", alternate = ["terminatesHere"])
+    val terminatesHere: Boolean = false
 )
 
-data class StationTrainsData(
-    val trains: List<StationTrain> = emptyList()
-)
-
-// ── API Response wrapper (API returns "success" bool) ─────────────────────────
+// ── API Response wrapper ──────────────────────────────────────────────────────
 
 data class ApiResponse<T>(
-    @SerializedName("success") val status: Boolean,
+    @SerializedName(value = "status", alternate = ["success"])
+    val status: Boolean = false,
     val message: String = "",
     val data: T? = null
 )

@@ -18,6 +18,7 @@ import io.github.jan.supabase.gotrue.auth
 import com.yatrain.app.models.PNRStatus
 import com.yatrain.app.models.SavedStationAlert
 import com.yatrain.app.models.SavedTicket
+import com.yatrain.app.models.SavedTrain
 import com.yatrain.app.models.Station
 import com.yatrain.app.models.Train
 import com.yatrain.app.services.SavedDataRepository
@@ -25,38 +26,40 @@ import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
 import com.yatrain.app.ui.screens.track.LiveTrainEntry
 import com.yatrain.app.ui.screens.track.StationInfo
+import com.yatrain.app.ui.screens.track.TrainRef
 import com.yatrain.app.ui.screens.track.allStationsForSearch
-import com.yatrain.app.ui.screens.track.stationSchedule
+import com.yatrain.app.ui.screens.track.searchTrainsByName
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 // ── Curated popular trains (mirrors iOS list) ─────────────────────────────────
 
 internal val curatedPopularTrains = listOf(
-    PopularTrain("12951","Mumbai Rajdhani",       "Mumbai Central","New Delhi",       "17:00","08:35"),
-    PopularTrain("12952","Mumbai Rajdhani",       "New Delhi",     "Mumbai Central",  "16:55","08:15"),
-    PopularTrain("12259","Sealdah Duronto",       "Sealdah",       "New Delhi",       "20:05","10:00"),
-    PopularTrain("12260","Sealdah Duronto",       "New Delhi",     "Sealdah",         "12:30","05:20"),
-    PopularTrain("12009","Mumbai Shatabdi",       "Mumbai Central","Ahmedabad",       "06:25","12:55"),
-    PopularTrain("12010","Mumbai Shatabdi",       "Ahmedabad",     "Mumbai Central",  "14:30","21:00"),
-    PopularTrain("12301","Howrah Rajdhani",       "Howrah",        "New Delhi",       "14:05","10:00"),
-    PopularTrain("12302","Howrah Rajdhani",       "New Delhi",     "Howrah",          "17:00","13:05"),
-    PopularTrain("22229","Vande Bharat Express",  "New Delhi",     "Chhatarpur",      "06:00","14:00"),
-    PopularTrain("22230","Vande Bharat Express",  "Chhatarpur",    "New Delhi",       "15:00","23:00"),
-    PopularTrain("12001","Bhopal Shatabdi",       "New Delhi",     "Bhopal",          "06:00","14:00"),
-    PopularTrain("12002","Bhopal Shatabdi",       "Bhopal",        "New Delhi",       "15:00","23:00"),
-    PopularTrain("12431","Trivandrum Rajdhani",   "New Delhi",     "Trivandrum",      "19:55","04:30"),
-    PopularTrain("12432","Trivandrum Rajdhani",   "Trivandrum",    "New Delhi",       "11:55","10:30"),
-    PopularTrain("12621","Tamil Nadu SF Express", "Chennai",       "New Delhi",       "22:00","07:40"),
-    PopularTrain("12622","Tamil Nadu SF Express", "New Delhi",     "Chennai",         "22:30","08:00"),
-    PopularTrain("12627","Karnataka Express",     "Bengaluru",     "New Delhi",       "20:15","11:15"),
-    PopularTrain("12628","Karnataka Express",     "New Delhi",     "Bengaluru",       "22:30","14:00"),
-    PopularTrain("12025","Pune Shatabdi",         "New Delhi",     "Pune",            "06:15","23:45"),
-    PopularTrain("12026","Pune Shatabdi",         "Pune",          "New Delhi",       "00:30","18:05"),
+    PopularTrain("12951","Mumbai Rajdhani",       "Mumbai Central","New Delhi",       "",""),
+    PopularTrain("12952","Mumbai Rajdhani",       "New Delhi",     "Mumbai Central",  "",""),
+    PopularTrain("12259","Sealdah Duronto",       "Sealdah",       "New Delhi",       "",""),
+    PopularTrain("12260","Sealdah Duronto",       "New Delhi",     "Sealdah",         "",""),
+    PopularTrain("12009","Mumbai Shatabdi",       "Mumbai Central","Ahmedabad",       "",""),
+    PopularTrain("12010","Mumbai Shatabdi",       "Ahmedabad",     "Mumbai Central",  "",""),
+    PopularTrain("12301","Howrah Rajdhani",       "Howrah",        "New Delhi",       "",""),
+    PopularTrain("12302","Howrah Rajdhani",       "New Delhi",     "Howrah",          "",""),
+    PopularTrain("22229","Vande Bharat Express",  "New Delhi",     "Chhatarpur",      "",""),
+    PopularTrain("22230","Vande Bharat Express",  "Chhatarpur",    "New Delhi",       "",""),
+    PopularTrain("12001","Bhopal Shatabdi",       "New Delhi",     "Bhopal",          "",""),
+    PopularTrain("12002","Bhopal Shatabdi",       "Bhopal",        "New Delhi",       "",""),
+    PopularTrain("12431","Trivandrum Rajdhani",   "New Delhi",     "Trivandrum",      "",""),
+    PopularTrain("12432","Trivandrum Rajdhani",   "Trivandrum",    "New Delhi",       "",""),
+    PopularTrain("12621","Tamil Nadu SF Express", "Chennai",       "New Delhi",       "",""),
+    PopularTrain("12622","Tamil Nadu SF Express", "New Delhi",     "Chennai",         "",""),
+    PopularTrain("12627","Karnataka Express",     "Bengaluru",     "New Delhi",       "",""),
+    PopularTrain("12628","Karnataka Express",     "New Delhi",     "Bengaluru",       "",""),
+    PopularTrain("12025","Pune Shatabdi",         "New Delhi",     "Pune",            "",""),
+    PopularTrain("12026","Pune Shatabdi",         "Pune",          "New Delhi",       "",""),
 )
 
 class SearchViewModel(app: Application) : AndroidViewModel(app) {
@@ -124,6 +127,9 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     private val _isTicketSaved = MutableStateFlow(false)
     val isTicketSaved: StateFlow<Boolean> = _isTicketSaved.asStateFlow()
 
+    private val _isTrainSaved = MutableStateFlow(false)
+    val isTrainSaved: StateFlow<Boolean> = _isTrainSaved.asStateFlow()
+
     // ── Popular trains state ──────────────────────────────────────────────────
 
     private val _popularTrains = MutableStateFlow<List<PopularTrain>>(curatedPopularTrains)
@@ -136,6 +142,9 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _stationSuggestions = MutableStateFlow<List<StationInfo>>(emptyList())
     val stationSuggestions: StateFlow<List<StationInfo>> = _stationSuggestions.asStateFlow()
+
+    private val _trainNameSuggestions = MutableStateFlow<List<TrainRef>>(emptyList())
+    val trainNameSuggestions: StateFlow<List<TrainRef>> = _trainNameSuggestions.asStateFlow()
 
     private val _selectedStation = MutableStateFlow<StationInfo?>(null)
     val selectedStation: StateFlow<StationInfo?> = _selectedStation.asStateFlow()
@@ -172,23 +181,29 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             _pnrResult.value = null
             _error.value = null
             _stationSuggestions.value = emptyList()
+            _trainNameSuggestions.value = emptyList()
             return
         }
 
-        // Station name typeahead: any letter character triggers station search
+        // Letter-based query → station + train name typeahead
         if (trimmed.any { it.isLetter() }) {
             val q = trimmed.lowercase()
-            // Show local matches immediately so there's no blank flash
-            _stationSuggestions.value = allStationsForSearch.filter { s ->
-                s.name.lowercase().contains(q) ||
-                s.city.lowercase().contains(q) ||
-                s.code.lowercase().startsWith(q)
-            }.take(8)
+            if (trimmed.length >= 2) {
+                _stationSuggestions.value = allStationsForSearch.filter { s ->
+                    s.name.lowercase().contains(q) ||
+                    s.city.lowercase().contains(q) ||
+                    s.code.lowercase().startsWith(q)
+                }.take(5)
+                _trainNameSuggestions.value = searchTrainsByName(trimmed)
+            } else {
+                _stationSuggestions.value = emptyList()
+                _trainNameSuggestions.value = emptyList()
+            }
             _results.value = emptyList()
             _pnrResult.value = null
             _error.value = null
 
-            // Also fire live autocomplete after 300ms debounce to get full station list
+            // Fire live station autocomplete after 300ms debounce
             if (trimmed.length >= 2) {
                 searchJob?.cancel()
                 searchJob = viewModelScope.launch {
@@ -200,7 +215,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                                     it.code.equals(r.code, ignoreCase = true)
                                 }
                                 StationInfo(r.code, r.name, local?.city ?: "", local?.lat ?: 0.0, local?.lng ?: 0.0)
-                            }.take(8)
+                            }.take(5)
                         }
                     }
                 }
@@ -209,6 +224,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         _stationSuggestions.value = emptyList()
+        _trainNameSuggestions.value = emptyList()
         if (trimmed.length < 4) {
             _results.value = emptyList(); _pnrResult.value = null; _error.value = null
         }
@@ -289,37 +305,52 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         _query.value = station.name
         _stationSuggestions.value = emptyList()
         _selectedStation.value = station
-        _stationTrains.value = emptyList()
         _pnrResult.value = null
         _results.value = emptyList()
         _error.value = null
+        _stationTrains.value = emptyList()
 
         viewModelScope.launch {
             _stationTrainsLoading.value = true
-            api.getStationTrains(station.code)
-                .onSuccess { trains ->
-                    _stationTrains.value = trains.map { t ->
-                        val dep = t.departure.replace(".", ":").ifBlank { "Last" }
-                        val arr = t.arrival.replace(".", ":").ifBlank { "First" }
-                        LiveTrainEntry(
-                            number    = t.number,
-                            name      = t.name,
-                            fromCode  = "",
-                            fromName  = t.source,
-                            toCode    = "",
-                            toName    = t.destination,
-                            arrival   = arr,
-                            departure = dep,
-                            platform  = t.platform.ifBlank { "–" },
-                            delayMin  = t.delayMinutes
-                        )
+            withTimeoutOrNull(15_000L) {
+                api.getStationTrains(station.code)
+                    .onSuccess { trains ->
+                        _stationTrains.value = trains.map { t ->
+                            val dep = t.departure.replace(".", ":").ifBlank { "Last" }
+                            val arr = t.arrival.replace(".", ":").ifBlank { "First" }
+                            LiveTrainEntry(
+                                number    = t.number,
+                                name      = t.name,
+                                fromCode  = "",
+                                fromName  = t.source,
+                                toCode    = "",
+                                toName    = t.destination,
+                                arrival   = arr,
+                                departure = dep,
+                                platform  = t.platform.ifBlank { "–" },
+                                delayMin  = t.delayMinutes
+                            )
+                        }
                     }
-                }
-                .onFailure {
-                    // Fall back to local static schedule for major stations
-                    _stationTrains.value = stationSchedule(station.code)
-                }
+                    .onFailure { e -> _error.value = e.message ?: "Could not load trains for ${station.name}." }
+            }
             _stationTrainsLoading.value = false
+        }
+    }
+
+    fun onTrainNameSelected(train: TrainRef) {
+        searchJob?.cancel()
+        _query.value = train.number
+        _stationSuggestions.value = emptyList()
+        _trainNameSuggestions.value = emptyList()
+        _selectedStation.value = null
+        _stationTrains.value = emptyList()
+        _pnrResult.value = null
+        _error.value = null
+        searchJob = viewModelScope.launch {
+            _isLoading.value = true
+            doSearch(train.number)
+            _isLoading.value = false
         }
     }
 
@@ -327,6 +358,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         _selectedStation.value = null
         _stationTrains.value = emptyList()
         _stationSuggestions.value = emptyList()
+        _trainNameSuggestions.value = emptyList()
         _query.value = ""
         _results.value = emptyList()
         _pnrResult.value = null
@@ -337,7 +369,23 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onTrainCardTapped(train: Train) {
         _selectedTrain.value = train
+        _isTrainSaved.value = repo.isTrainSaved(userId(), train.number)
         viewModelScope.launch { loadScheduleFor(train) }
+    }
+
+    fun toggleSaveTrain() {
+        val train = _selectedTrain.value ?: return
+        val uid = userId()
+        if (repo.isTrainSaved(uid, train.number)) {
+            val record = repo.getTrains(uid).firstOrNull { it.trainNumber == train.number }
+            if (record != null) repo.deleteTrain(uid, record.id)
+            _isTrainSaved.value = false
+            _snackbarMessage.value = "Train removed from saved"
+        } else {
+            repo.saveTrain(uid, SavedTrain(trainNumber = train.number, trainName = train.name, from = train.source, to = train.destination))
+            _isTrainSaved.value = true
+            _snackbarMessage.value = "Train saved to your watchlist"
+        }
     }
 
     private suspend fun loadScheduleFor(train: Train) {
@@ -357,6 +405,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         _schedule.value = emptyList()
         _currentStopIndex.value = 0
         _alertedStations.value = emptySet()
+        _isTrainSaved.value = false
     }
 
     // ── Alert picker ──────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -19,6 +20,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -110,6 +112,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
     val isLocating           by viewModel.isLocating.collectAsStateWithLifecycle()
     val showingPopularTrains by viewModel.showingPopularTrains.collectAsStateWithLifecycle()
     val stationSuggestions   by viewModel.stationSuggestions.collectAsStateWithLifecycle()
+    val trainSuggestions     by viewModel.trainSuggestions.collectAsStateWithLifecycle()
     val currentStop     by viewModel.currentStopIndex.collectAsStateWithLifecycle()
     val isTrainSaved    by viewModel.isTrainSaved.collectAsStateWithLifecycle()
     val pnrContext      by viewModel.pnrContext.collectAsStateWithLifecycle()
@@ -125,15 +128,47 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
 
     val hasResult = trainResult != null || schedule.isNotEmpty()
 
-    // Helper: get last known location and forward to ViewModel
+    val listState = rememberLazyListState()
+    val showStatusScrim by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+    val statusBarScrimColor by animateColorAsState(
+        targetValue    = if (showStatusScrim) AppBackground else Color.Transparent,
+        animationSpec  = tween(150),
+        label          = "statusBarScrim"
+    )
+
+    // System back: clear result/suggestions before leaving the tab
+    BackHandler(enabled = hasResult || stationSuggestions.isNotEmpty() || trainSuggestions.isNotEmpty()) {
+        viewModel.clearResult()
+        focusManager.clearFocus()
+    }
+
+    // Helper: get location and forward to ViewModel.
+    // First tries last-known (fast), then fires requestSingleUpdate for a fresh fix —
+    // critical on Samsung where getLastKnownLocation often returns null.
+    @Suppress("DEPRECATION", "MissingPermission")
     fun tryGetLocation() {
         try {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val cached = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
                 ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 ?: lm.getLastKnownLocation(LocationManager.PASSIVE_PROVIDER)
-            loc?.let { viewModel.onLocationResult(it.latitude, it.longitude) }
-        } catch (_: SecurityException) {}
+            if (cached != null) {
+                viewModel.onLocationResult(cached.latitude, cached.longitude)
+                return
+            }
+            // No cached fix — request a real one (common on Samsung / first boot)
+            val listener = object : android.location.LocationListener {
+                override fun onLocationChanged(loc: android.location.Location) {
+                    try { lm.removeUpdates(this) } catch (_: Exception) {}
+                    viewModel.onLocationResult(loc.latitude, loc.longitude)
+                }
+                @Deprecated("Deprecated") override fun onStatusChanged(p: String?, s: Int, e: android.os.Bundle?) {}
+            }
+            val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+                .filter { lm.isProviderEnabled(it) }
+            if (providers.isEmpty()) { viewModel.stopLocating(); return }
+            providers.forEach { lm.requestSingleUpdate(it, listener, android.os.Looper.getMainLooper()) }
+        } catch (_: SecurityException) { viewModel.stopLocating() }
     }
 
     // Location permission launcher
@@ -163,6 +198,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
             context, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
         if (hasPerm) {
+            viewModel.startLocating()
             if (detectedStation != null) viewModel.refreshLiveTrains()
             else tryGetLocation()
         }
@@ -170,6 +206,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
+            state          = listState,
             modifier       = Modifier.fillMaxSize().background(AppBackground),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
@@ -200,6 +237,21 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                             keyboardController?.hide()
                             focusManager.clearFocus()
                             viewModel.onStationSelected(station)
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
+            // ── Train name suggestions ───────────────────────────────────────
+            if (trainSuggestions.isNotEmpty()) {
+                item {
+                    com.yatrain.app.ui.screens.search.TrainNameSuggestionsCard(
+                        suggestions = trainSuggestions,
+                        onSelect    = { train ->
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            viewModel.onTrainSuggestionSelected(train)
                         },
                         modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
                     )
@@ -395,12 +447,26 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                         }
                         HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
 
-                        if (isLocating || (detectedStation != null && liveTrains.isEmpty())) {
+                        if (isLocating) {
                             Box(
                                 Modifier.fillMaxWidth().height(120.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(color = AppOrange, modifier = Modifier.size(28.dp))
+                            }
+                        } else if (liveTrains.isEmpty() && detectedStation != null) {
+                            Box(
+                                Modifier.fillMaxWidth().height(120.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    // Show actual API error when available so the problem is immediately visible
+                                    error ?: LocalStrings.current.noTrainsFound,
+                                    fontSize = 13.sp,
+                                    color = if (error != null) AppOrange else AppMuted,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 24.dp)
+                                )
                             }
                         } else if (liveTrains.isEmpty()) {
                             Box(
@@ -440,6 +506,14 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                 )
             }
         }
+
+        // Status bar scrim — fades in when content scrolls behind the transparent status bar
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(statusBarScrimColor)
+        )
 
         // Snackbar overlay
         SnackbarHost(
@@ -833,18 +907,13 @@ private fun LiveStatusCard(
                 }
                 OutlinedButton(
                     onClick  = onSaveTrain,
-                    enabled  = isPro,
+                    enabled  = true,
                     modifier = Modifier.weight(1f),
                     shape    = RoundedCornerShape(14.dp),
                     colors   = ButtonDefaults.outlinedButtonColors(
-                        contentColor         = if (isSaved) AppOrange else AppNavy,
-                        disabledContentColor = AppMuted
+                        contentColor = if (isSaved) AppOrange else AppNavy,
                     ),
-                    border   = BorderStroke(1.dp, when {
-                        !isPro  -> AppBorder
-                        isSaved -> AppOrange.copy(0.5f)
-                        else    -> AppBorder
-                    })
+                    border   = BorderStroke(1.dp, if (isSaved) AppOrange.copy(0.5f) else AppBorder)
                 ) {
                     Icon(
                         if (isSaved) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,

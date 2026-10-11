@@ -97,9 +97,11 @@ fun SearchScreen(
     val alertPickerStation by viewModel.alertPickerStation.collectAsStateWithLifecycle()
     val snackMsg           by viewModel.snackbarMessage.collectAsStateWithLifecycle()
     val isTicketSaved      by viewModel.isTicketSaved.collectAsStateWithLifecycle()
+    val isTrainSaved       by viewModel.isTrainSaved.collectAsStateWithLifecycle()
     val popularTrains      by viewModel.popularTrains.collectAsStateWithLifecycle()
     val popularLoading     by viewModel.popularLoading.collectAsStateWithLifecycle()
     val stationSuggestions    by viewModel.stationSuggestions.collectAsStateWithLifecycle()
+    val trainNameSuggestions  by viewModel.trainNameSuggestions.collectAsStateWithLifecycle()
     val selectedStation       by viewModel.selectedStation.collectAsStateWithLifecycle()
     val stationTrains         by viewModel.stationTrains.collectAsStateWithLifecycle()
     val stationTrainsLoading  by viewModel.stationTrainsLoading.collectAsStateWithLifecycle()
@@ -130,12 +132,17 @@ fun SearchScreen(
                 isLoading    = scheduleLoading,
                 currentIndex = currentStop,
                 alerted      = alerted,
+                isSaved      = isTrainSaved,
+                isPro        = isPro,
                 onAlertTap   = { station ->
                     if (station.code in alerted) viewModel.cancelStationAlert(station)
                     else if (!isPro && alerted.size >= 2) showPaywall = true
                     else viewModel.showAlertPicker(station)
                 },
-                onBack = { viewModel.clearSelection() }
+                onBack       = { viewModel.clearSelection() },
+                onTrack      = { onNavigateToTrack(selectedTrain!!.number, null) },
+                onSave       = { viewModel.toggleSaveTrain() },
+                onUpgrade    = { showPaywall = true }
             )
 
             // Alert picker sheet shown on top
@@ -185,6 +192,21 @@ fun SearchScreen(
                             keyboardController?.hide()
                             focusManager.clearFocus()
                             viewModel.onStationSelected(station)
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
+            // Train name suggestions (Rajdhani, Duronto, Shatabdi, etc.)
+            if (trainNameSuggestions.isNotEmpty()) {
+                item {
+                    TrainNameSuggestionsCard(
+                        suggestions = trainNameSuggestions,
+                        onSelect    = { train ->
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            viewModel.onTrainNameSelected(train)
                         },
                         modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
                     )
@@ -677,12 +699,21 @@ private fun PNRStatus.effectiveBerthNo(): Int {
 
 private fun coachPositionHint(coachCode: String, dest: String): String {
     val u = coachCode.uppercase()
-    val dir = if (dest.isNotBlank()) "towards $dest" else "check platform display"
+    val n = u.filter { it.isDigit() }.toIntOrNull() ?: 1
+    // Engine leads the train facing the destination — AC coaches are near the engine.
+    val engineSide = if (dest.isNotBlank()) "Walk towards $dest (engine end)" else "Walk towards engine end"
+    val guardSide  = "Walk towards guard's van (rear end)"
     return when {
-        u.startsWith("A") || u.startsWith("H") -> "Walk towards Guard\nYour coach is near the rear"
-        u.startsWith("B") || u.startsWith("C") -> "Walk towards AC section\n$dir"
-        u.startsWith("S") -> "Check middle section\n$dir"
-        else -> "Check platform display\n$dir"
+        u.startsWith("H") -> "$engineSide\n1st AC — near the locomotive"
+        u.startsWith("A") -> "$engineSide\n2nd AC — near the locomotive"
+        u.startsWith("B") -> if (n <= 4) "$engineSide\n3rd AC — front-middle of train"
+                             else "Middle of train\n3rd AC — rear-middle section"
+        u.startsWith("S") -> if (n <= 6) "Middle of train\nSleeper — mid section"
+                             else "$guardSide\nSleeper — rear section"
+        u.startsWith("D") && n <= 2 -> "$engineSide\nGeneral coach near the engine"
+        u.startsWith("D") -> "$guardSide\nGeneral coach near the guard"
+        u.startsWith("G") || u == "GRD" -> "$guardSide\nGuard's van at very rear"
+        else -> "Check platform display board"
     }
 }
 
@@ -743,7 +774,7 @@ private fun CoachMapCard(
     }
 
     Card(
-        modifier  = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+        modifier  = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
         shape     = RoundedCornerShape(18.dp),
         colors    = CardDefaults.cardColors(containerColor = AppCard),
         border    = BorderStroke(1.dp, AppBorder),
@@ -864,7 +895,21 @@ private fun CoachMapCard(
             }
 
             // ── Direction pill ────────────────────────────────────────────
+            // Arrow direction: engine faces destination (←), guard is at rear (→).
+            // AC coaches (H,A,B) are near engine → point towards destination.
+            // Sleeper/General rear (S7+, D3, GRD) → point towards guard.
             val sDir = LocalStrings.current
+            val activeCode = effectiveResult?.effectiveCoachId()?.uppercase() ?: ""
+            val activeNum  = activeCode.filter { it.isDigit() }.toIntOrNull() ?: 1
+            val dirArrow = when {
+                activeCode.isEmpty() -> "←"
+                activeCode.startsWith("H") || activeCode.startsWith("A") -> "←"
+                activeCode.startsWith("B") -> "←"
+                activeCode.startsWith("S") && activeNum > 6 -> "→"
+                activeCode.startsWith("S") -> "←"
+                activeCode.startsWith("D") && activeNum >= 3 -> "→"
+                else -> "←"
+            }
             Row(
                 modifier = Modifier
                     .padding(horizontal = 18.dp)
@@ -874,7 +919,7 @@ private fun CoachMapCard(
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("←", fontSize = 15.sp, color = AppOrange, fontWeight = FontWeight.Bold)
+                Text(dirArrow, fontSize = 15.sp, color = AppOrange, fontWeight = FontWeight.Bold)
                 Text(
                     if (effectiveResult != null) "${sDir.directionTowards} ${stationNameFor(effectiveResult.to)}"
                     else sDir.directionDefault,
@@ -926,7 +971,8 @@ private fun CoachMapCard(
                 LazyRow(
                     state                 = listState,
                     contentPadding        = PaddingValues(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier              = Modifier.graphicsLayer { alpha = if (isActive) 0.9f else 0.2f }
                 ) {
                     itemsIndexed(coaches) { idx, coach ->
                         CoachItem(
@@ -968,25 +1014,23 @@ private fun CoachMapCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Single coach illustration — flat design
+//  Single coach illustration — train-graphic(3).html commuter style
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun CoachItem(coach: CoachInfo, shimmerProgress: Float, mirrored: Boolean = false) {
-    // Flat colour palette: warm salmon when highlighted, cool blue-gray otherwise
-    val bodyBg   = if (coach.highlighted) Color(0xFFFFF0EC) else Color(0xFFEBF0F8)
-    val winBg    = if (coach.highlighted) Color(0xFFFFD5C5) else Color(0xFFCDD9EE)
-    val stripe1  = if (coach.highlighted) Color(0xFFFFCCBA) else Color(0xFFBFCCE0)
-    val stripe2  = if (coach.highlighted) Color(0xFFEEB8A4) else Color(0xFFB0BFCF)
-    val underBg  = if (coach.highlighted) Color(0xFFE8BEB4) else Color(0xFFC4CED8)
-    val wheelBg  = if (coach.highlighted) Color(0xFFD4A898) else Color(0xFFAEBCC8)
-    val railC    = Color(0xFFAAB8C4)
+    val isHighlighted = coach.highlighted
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(105.dp)) {
+    // Dark grey strokes (not jet black), pastel peach highlight body
+    val ink      = Color(0xFF6E6E6E)
+    val bodyFill = if (isHighlighted) Color(0xFFFFE4C8) else Color.White
+    val winFill  = Color.White
 
-        // ── YOU chip slot — always same height so all coaches baseline-align ──
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(136.dp)) {
+
+        // ── YOU chip — fixed-height slot so every coach rows up ───────────
         Box(Modifier.height(30.dp), contentAlignment = Alignment.BottomCenter) {
-            if (coach.highlighted) {
+            if (isHighlighted) {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50.dp))
@@ -995,191 +1039,157 @@ private fun CoachItem(coach: CoachInfo, shimmerProgress: Float, mirrored: Boolea
                     verticalAlignment     = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(Icons.Outlined.AccountCircle, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                    Text(LocalStrings.current.youLabel, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, letterSpacing = 0.5.sp)
+                    Icon(Icons.Outlined.AccountCircle, null, tint = Color.White,
+                        modifier = Modifier.size(12.dp))
+                    Text(LocalStrings.current.youLabel,
+                        fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                        color = Color.White, letterSpacing = 0.5.sp)
                 }
             }
         }
         Spacer(Modifier.height(3.dp))
 
-        // ── Coach Canvas ───────────────────────────────────────────────────────
-        Canvas(modifier = Modifier.fillMaxWidth().height(88.dp)) {
-            val w  = size.width
-            val h  = size.height
-            val cr = 6.dp.toPx()
+        Canvas(modifier = Modifier.fillMaxWidth().height(70.dp)) {
+            val w = size.width
+            val h = size.height
+
+            val shellW  = 2.6f.dp.toPx()
+            val lineW   = 2.0f.dp.toPx()
+            val winStW  = 2.0f.dp.toPx()
+            val wheelSt = 2.0f.dp.toPx()
+            val railW   = 2.2f.dp.toPx()
+
+            val bodyT = h * 0.10f
+            val bodyB = h * 0.895f
+            val bodyH = bodyB - bodyT
+            val cr    = CornerRadius(3.dp.toPx())
+            val wR    = bodyH * 0.130f
+            val wCY   = bodyB
+            val railY = h - 0.5f.dp.toPx()
+
+            // Rail
+            drawLine(ink, Offset(0f, railY), Offset(w, railY), railW)
 
             if (coach.kind == CoachKind.LOCO) {
-                // ── VANDE BHARAT style LOCOMOTIVE ─────────────────────────
-                val vbSilver = Color(0xFFEEF0F8)
-                val vbBlue   = Color(0xFF003B9A)
-                val vbGlass  = Color(0xFF1A2633)
-                val vbWheel  = Color(0xFF455A64)
-
-                val bodyH    = h * 0.57f
-                val bodyT    = h * 0.06f
-                val bodyB    = bodyT + bodyH
-                val noseW    = w * 0.28f
                 val leftFace = !mirrored
+                val nX = w * 0.45f
 
-                // Smooth bullet-nose body outline
-                val bodyOutline = Path()
+                val body = Path()
                 if (leftFace) {
-                    bodyOutline.moveTo(w - cr, bodyT)
-                    bodyOutline.quadraticTo(w, bodyT, w, bodyT + cr)
-                    bodyOutline.lineTo(w, bodyB - cr)
-                    bodyOutline.quadraticTo(w, bodyB, w - cr, bodyB)
-                    bodyOutline.lineTo(noseW, bodyB)
-                    bodyOutline.cubicTo(noseW * 0.35f, bodyB, 0f, bodyB - bodyH * 0.17f, 0f, bodyT + bodyH * 0.5f)
-                    bodyOutline.cubicTo(0f, bodyT + bodyH * 0.17f, noseW * 0.35f, bodyT, noseW, bodyT)
-                    bodyOutline.close()
+                    body.moveTo(0f, bodyB)
+                    body.quadraticTo(w*0.03f, bodyT + bodyH*0.68f, w*0.09f, bodyT + bodyH*0.54f)
+                    body.lineTo(w*0.30f, bodyT + bodyH*0.23f)
+                    body.quadraticTo(w*0.39f, bodyT, nX, bodyT)
+                    body.lineTo(w, bodyT)
+                    body.lineTo(w, bodyB)
+                    body.close()
                 } else {
-                    bodyOutline.moveTo(cr, bodyT)
-                    bodyOutline.quadraticTo(0f, bodyT, 0f, bodyT + cr)
-                    bodyOutline.lineTo(0f, bodyB - cr)
-                    bodyOutline.quadraticTo(0f, bodyB, cr, bodyB)
-                    bodyOutline.lineTo(w - noseW, bodyB)
-                    bodyOutline.cubicTo(w - noseW * 0.35f, bodyB, w, bodyB - bodyH * 0.17f, w, bodyT + bodyH * 0.5f)
-                    bodyOutline.cubicTo(w, bodyT + bodyH * 0.17f, w - noseW * 0.35f, bodyT, w - noseW, bodyT)
-                    bodyOutline.close()
+                    body.moveTo(w, bodyB)
+                    body.quadraticTo(w*0.97f, bodyT + bodyH*0.68f, w*0.91f, bodyT + bodyH*0.54f)
+                    body.lineTo(w*0.70f, bodyT + bodyH*0.23f)
+                    body.quadraticTo(w*0.61f, bodyT, w - nX, bodyT)
+                    body.lineTo(0f, bodyT)
+                    body.lineTo(0f, bodyB)
+                    body.close()
                 }
 
-                // 1. Silver body (full nose outline)
-                drawPath(bodyOutline, vbSilver)
-
-                // 2. Blue stripe — bottom 30%, follows the nose curve on the nose end
-                val stripeY   = bodyT + bodyH * 0.70f
-                val noseXStripe = noseW * 0.15f   // approx nose-curve x at stripeY
-                val bluePath = Path()
-                if (leftFace) {
-                    bluePath.moveTo(w, stripeY)
-                    bluePath.lineTo(w, bodyB - cr)
-                    bluePath.quadraticTo(w, bodyB, w - cr, bodyB)
-                    bluePath.lineTo(noseW, bodyB)
-                    bluePath.cubicTo(noseW * 0.30f, bodyB, noseW * 0.05f, bodyT + bodyH * 0.78f, noseXStripe, stripeY)
-                    bluePath.close()
-                } else {
-                    bluePath.moveTo(0f, stripeY)
-                    bluePath.lineTo(0f, bodyB - cr)
-                    bluePath.quadraticTo(0f, bodyB, cr, bodyB)
-                    bluePath.lineTo(w - noseW, bodyB)
-                    bluePath.cubicTo(w - noseW * 0.30f, bodyB, w - noseW * 0.05f, bodyT + bodyH * 0.78f, w - noseXStripe, stripeY)
-                    bluePath.close()
+                // Wheels behind body
+                val wxA = if (leftFace) w*0.63f else w*0.13f
+                val wxB = if (leftFace) w*0.84f else w*0.37f
+                for (wx in listOf(wxA, wxB)) {
+                    drawCircle(Color.White, wR, Offset(wx, wCY))
+                    drawCircle(ink, wR, Offset(wx, wCY), style = Stroke(wheelSt))
                 }
-                drawPath(bluePath, vbBlue)
 
-                // Angled windshield glass at nose
-                val gpLeft = Path().apply {
-                    moveTo(noseW * 0.78f, bodyT + bodyH * 0.06f)
-                    lineTo(noseW * 0.10f, bodyT + bodyH * 0.22f)
-                    lineTo(noseW * 0.08f, bodyT + bodyH * 0.58f)
-                    lineTo(noseW * 0.76f, bodyT + bodyH * 0.58f)
-                    close()
-                }
-                val gpRight = Path().apply {
-                    moveTo(w - noseW * 0.78f, bodyT + bodyH * 0.06f)
-                    lineTo(w - noseW * 0.10f, bodyT + bodyH * 0.22f)
-                    lineTo(w - noseW * 0.08f, bodyT + bodyH * 0.58f)
-                    lineTo(w - noseW * 0.76f, bodyT + bodyH * 0.58f)
-                    close()
-                }
-                drawPath(if (leftFace) gpLeft else gpRight, vbGlass)
+                // Body fill + outline
+                drawPath(body, bodyFill)
+                drawPath(body, ink, style = Stroke(shellW))
 
-                // Headlight in blue stripe zone
-                val hlX = if (leftFace) w * 0.03f else w - w * 0.03f
-                val hlY = bodyT + bodyH * 0.81f
-                drawCircle(Color(0xFFFFF9C4), w * 0.050f, Offset(hlX, hlY))
-                drawCircle(Color.White,       w * 0.028f, Offset(hlX, hlY))
+                // Headlight at nose tip
+                val hlX = if (leftFace) w*0.025f else w*0.975f
+                val hlY = bodyT + bodyH*0.80f
+                drawCircle(Color.White, 3.dp.toPx(), Offset(hlX, hlY))
+                drawCircle(ink, 3.dp.toPx(), Offset(hlX, hlY), style = Stroke(1.8f.dp.toPx()))
 
-                // Undercarriage
-                val ucT = bodyB
-                val ucH = h * 0.08f
-                val ucB = ucT + ucH
-                drawRect(Color(0xFF37474F), Offset(0f, ucT), Size(w, ucH))
+                // Horizontal dash below cab window area
+                val hLy = bodyT + bodyH*0.71f
+                drawLine(ink,
+                    Offset(if (leftFace) w*0.01f else w*0.59f, hLy),
+                    Offset(if (leftFace) w*0.23f else w*0.99f, hLy), lineW)
 
-                // 4 wheels
-                val wR    = h * 0.092f
-                val wCY   = ucB + wR * 0.52f
-                val railY = wCY + wR * 0.88f
-                val wXs   = listOf(w * 0.14f, w * 0.38f, w * 0.62f, w * 0.86f)
-                for (wx in wXs) {
-                    drawCircle(vbWheel,           wR,         Offset(wx, wCY))
-                    drawCircle(Color(0xFF78909C), wR * 0.40f, Offset(wx, wCY))
-                    drawCircle(vbWheel, wR, Offset(wx, wCY), style = Stroke(1.2f.dp.toPx()))
-                }
-                drawLine(Color(0xFF37474F), Offset(wXs[0], wCY), Offset(wXs.last(), wCY), 2.dp.toPx())
-                drawLine(railC, Offset(0f, railY), Offset(w, railY), 1.5f.dp.toPx())
+                // One window on body section
+                val wW = w*0.22f; val wH = bodyH*0.36f; val wY = bodyT + bodyH*0.16f
+                val wX = if (leftFace) w*0.56f else w*0.22f
+                drawRoundRect(winFill, Offset(wX, wY), Size(wW, wH), CornerRadius(3.dp.toPx()))
+                drawRoundRect(ink,     Offset(wX, wY), Size(wW, wH), CornerRadius(3.dp.toPx()), style = Stroke(winStW))
+
+                // Lower stripe on rectangular portion only
+                val strY = bodyT + bodyH*0.74f
+                drawLine(ink,
+                    Offset(if (leftFace) nX else 0f, strY),
+                    Offset(if (leftFace) w  else w - nX, strY), lineW)
+
+                // Pantograph — simple ∧ (two lines only, no crossbar)
+                val px0  = if (leftFace) w*0.58f else w*0.12f
+                val px1  = px0 + w*0.22f
+                val pMid = (px0 + px1) / 2f
+                drawLine(ink, Offset(px0,  bodyT), Offset(pMid, 0.5f.dp.toPx()), lineW * 0.70f)
+                drawLine(ink, Offset(pMid, 0.5f.dp.toPx()), Offset(px1, bodyT),  lineW * 0.70f)
 
             } else {
-                // ── Regular coach drawing ──────────────────────────────────
-                val bodyH  = h * 0.62f
-                val bodyT  = 0f
-                val bodyB  = bodyT + bodyH
+                // Wheels behind body
+                val wxL = w*0.22f; val wxR = w*0.78f
+                for (wx in listOf(wxL, wxR)) {
+                    drawCircle(Color.White, wR, Offset(wx, wCY))
+                    drawCircle(ink, wR, Offset(wx, wCY), style = Stroke(wheelSt))
+                }
 
-                val nWin   = if (coach.kind == CoachKind.POWER) 3 else 4
-                val winPad = 7.dp.toPx()
-                val winGap = 4.dp.toPx()
-                val winW   = (w - 2 * winPad - (nWin - 1) * winGap) / nWin
-                val winH   = bodyH * 0.30f
-                val winY   = bodyT + bodyH * 0.10f
-                val winCR  = 2.5f.dp.toPx()
+                // Body
+                drawRoundRect(bodyFill, Offset(0f, bodyT), Size(w, bodyH), cr)
+                drawRoundRect(ink,      Offset(0f, bodyT), Size(w, bodyH), cr, style = Stroke(shellW))
 
-                val ucH    = h * 0.085f
-                val ucT    = bodyB
-                val ucB    = ucT + ucH
-                val wR     = h * 0.088f
-                val wCY    = ucB + wR * 0.55f
-                val railY  = wCY + wR * 0.88f
+                // Sliding door frames ⊓ left + right
+                val dW  = w*0.11f
+                val dX0 = w*0.08f;  val dX1 = dX0 + dW
+                val rX1 = w*0.92f;  val rX0 = rX1 - dW
+                val dT  = bodyT + 2.dp.toPx()
+                val dB  = bodyB - 2.dp.toPx()
+                drawLine(ink, Offset(dX0, dT), Offset(dX0, dB), lineW)
+                drawLine(ink, Offset(dX0, dT), Offset(dX1, dT), lineW)
+                drawLine(ink, Offset(dX1, dT), Offset(dX1, dB), lineW)
+                drawLine(ink, Offset(rX0, dT), Offset(rX0, dB), lineW)
+                drawLine(ink, Offset(rX0, dT), Offset(rX1, dT), lineW)
+                drawLine(ink, Offset(rX1, dT), Offset(rX1, dB), lineW)
 
-                drawRoundRect(bodyBg, Offset(0f, bodyT), Size(w, bodyH), CornerRadius(cr))
-
+                // Windows between doors (3; 2 for power)
+                val nWin  = if (coach.kind == CoachKind.POWER) 2 else 3
+                val zoneL = dX1 + 2.dp.toPx()
+                val zoneR = rX0 - 2.dp.toPx()
+                val wGap  = 3.dp.toPx()
+                val wW    = (zoneR - zoneL - (nWin - 1) * wGap) / nWin
+                val wH    = bodyH * 0.36f
+                val wY    = bodyT + bodyH * 0.16f
                 for (i in 0 until nWin) {
-                    val wx = winPad + i * (winW + winGap)
-                    drawRoundRect(winBg, Offset(wx, winY), Size(winW, winH), CornerRadius(winCR))
+                    val wx = zoneL + i * (wW + wGap)
+                    drawRoundRect(winFill, Offset(wx, wY), Size(wW, wH), CornerRadius(3.dp.toPx()))
+                    drawRoundRect(ink,     Offset(wx, wY), Size(wW, wH), CornerRadius(3.dp.toPx()), style = Stroke(winStW))
                 }
 
-                val s1Y = bodyT + bodyH * 0.52f
-                val s2Y = bodyT + bodyH * 0.60f
-                val sH2 = bodyH * 0.065f
-                drawRect(stripe1, Offset(cr * 0.5f, s1Y), Size(w - cr, sH2))
-                drawRect(stripe2, Offset(cr * 0.5f, s2Y), Size(w - cr, sH2))
-
-                if (coach.highlighted) {
-                    drawRoundRect(
-                        color        = AppOrange,
-                        topLeft      = Offset(0f, bodyT),
-                        size         = Size(w, bodyH),
-                        cornerRadius = CornerRadius(cr),
-                        style        = Stroke(2.2f.dp.toPx())
-                    )
-                }
-
-                drawRect(underBg, Offset(cr * 0.5f, ucT), Size(w - cr, ucH))
-
-                val wxL = w * 0.24f
-                val wxR = w * 0.76f
-                for (wxPos in listOf(wxL, wxR)) {
-                    drawCircle(wheelBg,             wR,         Offset(wxPos, wCY))
-                    drawCircle(wheelBg.copy(0.55f), wR * 0.40f, Offset(wxPos, wCY))
-                    drawCircle(wheelBg.copy(0.85f), wR,         Offset(wxPos, wCY), style = Stroke(0.8f.dp.toPx()))
-                }
-                drawLine(underBg, Offset(wxL + wR * 0.4f, wCY), Offset(wxR - wR * 0.4f, wCY), 2.dp.toPx())
-                drawLine(railC, Offset(0f, railY), Offset(w, railY), 1.5f.dp.toPx())
+                // Single lower body stripe
+                val stripeY = bodyT + bodyH*0.74f
+                drawLine(ink, Offset(2.dp.toPx(), stripeY), Offset(w - 2.dp.toPx(), stripeY), lineW)
             }
         }
 
         Spacer(Modifier.height(5.dp))
-        Text(
-            coach.code,
-            fontSize   = 12.sp,
-            fontWeight = if (coach.highlighted) FontWeight.ExtraBold else FontWeight.Medium,
-            color      = if (coach.highlighted) AppOrange else Zinc500
-        )
-        Text(
-            coach.typeName,
-            fontSize   = 10.sp,
+        Text(coach.code,
+            fontSize   = 11.sp,
+            fontWeight = if (isHighlighted) FontWeight.ExtraBold else FontWeight.Medium,
+            color      = if (isHighlighted) AppOrange else Color(0xFF444444))
+        Text(coach.typeName,
+            fontSize   = 9.sp,
             fontWeight = FontWeight.Medium,
-            color      = if (coach.highlighted) AppOrange.copy(0.70f) else Zinc400
-        )
+            color      = if (isHighlighted) AppOrange.copy(0.75f) else Color(0xFF888888))
     }
 }
 
@@ -2045,8 +2055,13 @@ private fun RouteDetailView(
     isLoading:    Boolean,
     currentIndex: Int,
     alerted:      Set<String>,
+    isSaved:      Boolean,
+    isPro:        Boolean,
     onAlertTap:   (Station) -> Unit,
-    onBack:       () -> Unit
+    onBack:       () -> Unit,
+    onTrack:      () -> Unit,
+    onSave:       () -> Unit,
+    onUpgrade:    () -> Unit
 ) {
     LazyColumn(
         modifier       = Modifier.fillMaxSize().background(AppBackground),
@@ -2064,6 +2079,34 @@ private fun RouteDetailView(
                 Column(Modifier.weight(1f)) {
                     Text(train.name.localTrainName(), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${train.number}  ·  ${train.source.ifBlank { "–" }} → ${train.destination.ifBlank { "–" }}", fontSize = 12.sp, color = AppMuted)
+                }
+            }
+            HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
+            // ── CTAs matching Track screen ────────────────────────────────
+            Row(
+                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick  = { if (isPro) onTrack() else onUpgrade() },
+                    modifier = Modifier.weight(1f),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = AppOrange, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Map, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isPro) "Live Map" else "Live Map (Pro)", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick  = onSave,
+                    modifier = Modifier.weight(1f),
+                    shape    = RoundedCornerShape(14.dp),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = if (isSaved) AppOrange else AppNavy),
+                    border   = BorderStroke(1.dp, if (isSaved) AppOrange.copy(0.5f) else AppBorder)
+                ) {
+                    Icon(if (isSaved) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isSaved) "Saved" else "Save Train", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
                 }
             }
             HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
@@ -2548,6 +2591,51 @@ fun StationSuggestionsCard(
                     Column(Modifier.weight(1f)) {
                         Text(station.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppNavy, maxLines = 1)
                         Text("${station.code}  ·  ${station.city}", fontSize = 12.sp, color = AppMuted)
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null, tint = AppOrange, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Train name suggestions card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun TrainNameSuggestionsCard(
+    suggestions: List<com.yatrain.app.ui.screens.track.TrainRef>,
+    onSelect:    (com.yatrain.app.ui.screens.track.TrainRef) -> Unit,
+    modifier:    Modifier = Modifier
+) {
+    Card(
+        modifier  = modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color.White),
+        border    = BorderStroke(1.dp, AppBorder),
+        elevation = CardDefaults.cardElevation(12.dp)
+    ) {
+        Column {
+            suggestions.forEachIndexed { i, train ->
+                if (i > 0) HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onSelect(train) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier         = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(AppOrange.copy(0.10f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Outlined.DirectionsRailway, null, tint = AppOrange, modifier = Modifier.size(18.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(train.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppNavy, maxLines = 1)
+                        Text(train.number, fontSize = 12.sp, color = AppMuted)
                     }
                     Icon(Icons.Outlined.ChevronRight, null, tint = AppOrange, modifier = Modifier.size(16.dp))
                 }
