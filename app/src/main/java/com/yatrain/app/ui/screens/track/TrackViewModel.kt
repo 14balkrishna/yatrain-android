@@ -29,6 +29,8 @@ import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
 import com.yatrain.app.i18n.MlKitTranslator
 import com.yatrain.app.i18n.withTranslatedNames
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -105,6 +107,34 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
     private var searchJob: Job? = null
 
     private fun isTrainNumber(q: String) = q.length in 4..5 && q.all { it.isDigit() }
+    private fun isPNR(q: String)         = q.length == 10     && q.all { it.isDigit() }
+
+    // Converts raw exceptions to user-friendly messages — never exposes internal hostnames
+    private fun Throwable?.toUserMessage(fallback: String = "Something went wrong. Please try again."): String {
+        if (this == null) return fallback
+        val msg = message ?: ""
+        return when {
+            this is java.net.UnknownHostException ||
+            msg.contains("Unable to resolve host", ignoreCase = true) ||
+            msg.contains("No address associated", ignoreCase = true)  -> "No internet connection. Check your network and try again."
+            this is java.net.SocketTimeoutException ||
+            msg.contains("timeout", ignoreCase = true)                -> "Connection timed out. Please try again."
+            this is java.io.IOException                               -> "Network error. Please check your connection."
+            msg.isNotBlank()                                          -> msg
+            else                                                      -> fallback
+        }
+    }
+
+    // Set when the user has typed a valid 10-digit PNR — drives the PNR chip in the UI
+    private val _pnrHintQuery = MutableStateFlow<String?>(null)
+    val pnrHintQuery: StateFlow<String?> = _pnrHintQuery.asStateFlow()
+
+    // Live delay and speed from RailRadar — 0 means on time / stopped
+    private val _liveDelay = MutableStateFlow(0)
+    val liveDelay: StateFlow<Int> = _liveDelay.asStateFlow()
+
+    private val _liveSpeed = MutableStateFlow(0)
+    val liveSpeed: StateFlow<Int> = _liveSpeed.asStateFlow()
 
     // ── Location-based train loading ──────────────────────────────────────────
 
@@ -132,7 +162,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
                 if (trains != null) {
                     _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
                 } else {
-                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains. Check your connection."
+                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
                 }
             }
             _isLocating.value = false
@@ -167,7 +197,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
                 if (trains != null && trains.isNotEmpty()) {
                     _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
                 } else if (trains == null) {
-                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains. Check your connection."
+                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
                 }
             }
             _isLocating.value = false
@@ -217,6 +247,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         val trimmed = newQuery.trim()
 
         if (trimmed.any { it.isLetter() }) {
+            _pnrHintQuery.value = null
             val q = trimmed.lowercase()
             if (trimmed.length >= 2) {
                 _stationSuggestions.value = allStationsForSearch.filter { s ->
@@ -235,8 +266,15 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
 
         _stationSuggestions.value = emptyList()
         _trainSuggestions.value = emptyList()
-        if (trimmed.length < 4) {
+
+        if (isPNR(trimmed)) {
+            _pnrHintQuery.value = trimmed
             _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
+        } else {
+            _pnrHintQuery.value = null
+            if (trimmed.length < 4) {
+                _trainResult.value = null; _schedule.value = emptyList(); _error.value = null
+            }
         }
     }
 
@@ -256,7 +294,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
                 if (trains != null && trains.isNotEmpty()) {
                     _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
                 } else if (trains == null) {
-                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains for ${station.name}."
+                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains for ${station.name}.")
                 }
             }
             _isLocating.value = false
@@ -274,7 +312,11 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
 
     fun search() {
         val trimmed = _query.value.trim()
-        if (trimmed.length >= 4) { searchJob?.cancel(); searchJob = viewModelScope.launch { fetch(trimmed) } }
+        searchJob?.cancel()
+        when {
+            isPNR(trimmed)        -> searchJob = viewModelScope.launch { fetchPNR(trimmed) }
+            trimmed.length >= 4   -> searchJob = viewModelScope.launch { fetch(trimmed) }
+        }
     }
 
     /** Called when the user taps a row in the location-based live trains list. */
@@ -289,6 +331,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
             _error.value = "Enter a 4–5 digit train number to track."; return
         }
         _isLoading.value = true; _error.value = null; _trainResult.value = null; _schedule.value = emptyList()
+        _liveDelay.value = 0; _liveSpeed.value = 0
 
         val searchR = api.searchTrains(trainNumber)
         val firstTrain = searchR.getOrNull()?.firstOrNull()
@@ -299,27 +342,73 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
                 destination = MlKitTranslator.translate(firstTrain.destination)
             )
         } else {
-            _error.value = searchR.exceptionOrNull()?.message ?: "Train \"$trainNumber\" not found."
+            _error.value = searchR.exceptionOrNull().toUserMessage("Train \"$trainNumber\" not found.")
         }
 
         if (_trainResult.value != null) {
-            val schedR = api.getSchedule(trainNumber)
-            val ts = schedR.getOrNull()
-            if (ts != null) {
-                val translated = ts.route.withTranslatedNames()
-                _schedule.value = translated
-                _currentStopIndex.value = computeCurrentStop(translated)
+            // Fetch schedule and live status in parallel — live status failure is non-fatal
+            coroutineScope {
+                val schedDeferred = async { api.getSchedule(trainNumber) }
+                val liveDeferred  = async { api.getLiveStatus(trainNumber) }
+
+                val ts   = schedDeferred.await().getOrNull()
+                val live = liveDeferred.await().getOrNull()
+
+                if (live != null) {
+                    _liveDelay.value = live.delay.coerceAtLeast(0)
+                    _liveSpeed.value = live.speed.coerceAtLeast(0)
+                }
+
+                if (ts != null) {
+                    val translated = ts.route.withTranslatedNames()
+                    _schedule.value = translated
+                    // Prefer live station code for accuracy; fall back to time-based heuristic
+                    val liveCode = live?.currentStationCode.orEmpty()
+                    val liveIdx  = if (liveCode.isNotBlank())
+                        translated.indexOfFirst { it.code.equals(liveCode, ignoreCase = true) }
+                    else -1
+                    _currentStopIndex.value = if (liveIdx >= 0) liveIdx
+                        else computeCurrentStop(translated, _liveDelay.value)
+                }
             }
             _isTrainSaved.value = repo.isTrainSaved(userId(), trainNumber)
         }
         _isLoading.value = false
     }
 
+    // Fetches a PNR, then chains into fetch() to load the full train+schedule view.
+    private suspend fun fetchPNR(pnr: String) {
+        _isLoading.value = true; _error.value = null
+        _trainResult.value = null; _schedule.value = emptyList(); _pnrContext.value = null
+        _pnrHintQuery.value = null
+
+        val result  = api.getPNRStatus(pnr)
+        val status  = result.getOrNull()
+        if (status == null) {
+            _error.value = result.exceptionOrNull().toUserMessage("PNR not found. Please check the number and try again.")
+            _isLoading.value = false
+            return
+        }
+
+        _pnrContext.value = status.withTranslatedNames()
+
+        val trainNo = status.trainNumber.trim().filter { it.isDigit() }
+        if (trainNo.isBlank()) {
+            _error.value = "Train number not available for this PNR"
+            _isLoading.value = false
+            return
+        }
+
+        // fetch() manages _isLoading — it will set it to true again (no-op) then false when done
+        fetch(trainNo)
+    }
+
     fun clearResult() {
         _query.value = ""; _trainResult.value = null; _schedule.value = emptyList()
         _error.value = null; _alertedStations.value = emptySet(); _currentStopIndex.value = 0
-        _isTrainSaved.value = false; _pnrContext.value = null
+        _isTrainSaved.value = false; _pnrContext.value = null; _pnrHintQuery.value = null
         _stationSuggestions.value = emptyList(); _trainSuggestions.value = emptyList()
+        _liveDelay.value = 0; _liveSpeed.value = 0
     }
 
     fun toggleSaveTrain() {
@@ -337,8 +426,9 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Finds the index of the station whose scheduled departure is the most recent one before now. */
-    private fun computeCurrentStop(stations: List<Station>): Int {
+    /** Finds current stop index. Uses live station code when available; otherwise computes from
+     *  scheduled departure + delay offset so delayed trains aren't marked ahead of themselves. */
+    private fun computeCurrentStop(stations: List<Station>, delayMin: Int = 0): Int {
         if (stations.isEmpty()) return 0
         val cal = java.util.Calendar.getInstance()
         val nowMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
@@ -346,7 +436,8 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         for (i in stations.indices) {
             val dep = parseMinutes(stations[i].departure)
             if (dep == Int.MAX_VALUE) continue
-            if (dep <= nowMin) best = i else break
+            // Effective departure = scheduled + delay; train has departed if now >= effective dep
+            if (dep + delayMin <= nowMin) best = i else break
         }
         return best
     }

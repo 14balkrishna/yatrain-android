@@ -48,7 +48,7 @@ interface IRCTCApi {
         @Path("pnr")                pnr: String,
         @Header("X-RapidAPI-Key")   apiKey: String = BuildConfig.RAPIDAPI_KEY,
         @Header("X-RapidAPI-Host")  host: String   = IRCTC_HOST
-    ): ApiResponse<PNRStatus>
+    ): JsonElement  // PNR fields are at root level, not inside a "data" wrapper
 
     @GET("autocomplete/station/{query}")
     suspend fun autocompleteStation(
@@ -133,8 +133,14 @@ class TrainAPIService {
     }
 
     suspend fun getPNRStatus(pnr: String): Result<PNRStatus> = runCatching {
-        val resp = irctcApi.getPNRStatus(pnr)
-        resp.data ?: throw Exception(resp.message.ifBlank { "PNR not found" })
+        val root = irctcApi.getPNRStatus(pnr).asJsonObject
+        // Error envelope: {"success": false, "message": "..."} — fields are at root, not in "data"
+        if (root.get("success")?.asBoolean == false || root.get("status")?.asBoolean == false) {
+            throw Exception(root.get("message")?.asString?.ifBlank { null } ?: "PNR not found")
+        }
+        val status = gson.fromJson(root, PNRStatus::class.java)
+        if (status.pnrNumber.isBlank()) throw Exception("PNR details unavailable")
+        status
     }
 
     suspend fun getLiveStatus(trainNumber: String): Result<LiveStatus> = runCatching {

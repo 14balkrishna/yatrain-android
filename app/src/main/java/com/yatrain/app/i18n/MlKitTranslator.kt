@@ -9,6 +9,7 @@ import com.yatrain.app.models.PNRStatus
 import com.yatrain.app.models.Station
 import com.yatrain.app.models.Train
 import com.yatrain.app.ui.screens.track.LiveTrainEntry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -81,9 +82,13 @@ object MlKitTranslator {
     suspend fun translate(text: String): String {
         if (isEnglish || text.isBlank()) return text
         val t = translator ?: return text
-        return runCatching {
+        return try {
             withContext(Dispatchers.IO) { t.translate(text).await() }
-        }.getOrDefault(text)
+        } catch (e: CancellationException) {
+            throw e  // never swallow cancellation — structured concurrency requires it
+        } catch (_: Exception) {
+            text
+        }
     }
 }
 
@@ -94,50 +99,74 @@ object MlKitTranslator {
 @JvmName("translateStationList")
 suspend fun List<Station>.withTranslatedNames(): List<Station> {
     if (MlKitTranslator.isEnglish) return this
-    return coroutineScope {
-        map { s -> async { s.copy(name = MlKitTranslator.translate(s.name)) } }.awaitAll()
+    return try {
+        coroutineScope {
+            map { s -> async { s.copy(name = MlKitTranslator.translate(s.name)) } }.awaitAll()
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        this
     }
 }
 
 @JvmName("translateLiveTrainList")
 suspend fun List<LiveTrainEntry>.withTranslatedNames(): List<LiveTrainEntry> {
     if (MlKitTranslator.isEnglish) return this
-    return coroutineScope {
-        map { e ->
-            async {
-                e.copy(
-                    name     = MlKitTranslator.translate(e.name),
-                    fromName = MlKitTranslator.translate(e.fromName),
-                    toName   = MlKitTranslator.translate(e.toName)
-                )
-            }
-        }.awaitAll()
+    return try {
+        coroutineScope {
+            map { e ->
+                async {
+                    e.copy(
+                        name     = MlKitTranslator.translate(e.name),
+                        fromName = MlKitTranslator.translate(e.fromName),
+                        toName   = MlKitTranslator.translate(e.toName)
+                    )
+                }
+            }.awaitAll()
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        this
     }
 }
 
 @JvmName("translateTrainList")
 suspend fun List<Train>.withTranslatedNames(): List<Train> {
     if (MlKitTranslator.isEnglish) return this
-    return coroutineScope {
-        map { t ->
-            async {
-                t.copy(
-                    name        = MlKitTranslator.translate(t.name),
-                    source      = MlKitTranslator.translate(t.source),
-                    destination = MlKitTranslator.translate(t.destination)
-                )
-            }
-        }.awaitAll()
+    return try {
+        coroutineScope {
+            map { t ->
+                async {
+                    t.copy(
+                        name        = MlKitTranslator.translate(t.name),
+                        source      = MlKitTranslator.translate(t.source),
+                        destination = MlKitTranslator.translate(t.destination)
+                    )
+                }
+            }.awaitAll()
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        this
     }
 }
 
 suspend fun PNRStatus.withTranslatedNames(): PNRStatus {
     if (MlKitTranslator.isEnglish) return this
-    return copy(
-        trainName       = MlKitTranslator.translate(trainName),
-        from            = MlKitTranslator.translate(from),
-        to              = MlKitTranslator.translate(to),
-        boardingPoint   = MlKitTranslator.translate(boardingPoint),
-        reservationUpto = MlKitTranslator.translate(reservationUpto)
-    )
+    return try {
+        copy(
+            trainName       = MlKitTranslator.translate(trainName),
+            from            = MlKitTranslator.translate(from),
+            to              = MlKitTranslator.translate(to),
+            boardingPoint   = MlKitTranslator.translate(boardingPoint),
+            reservationUpto = MlKitTranslator.translate(reservationUpto)
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        this
+    }
 }

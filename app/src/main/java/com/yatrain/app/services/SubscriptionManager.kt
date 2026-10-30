@@ -2,6 +2,7 @@ package com.yatrain.app.services
 
 import android.app.Activity
 import android.content.Context
+import android.content.SharedPreferences
 import com.android.billingclient.api.*
 import com.yatrain.app.BuildConfig
 import com.yatrain.app.models.SubscriptionTier
@@ -29,9 +30,19 @@ import kotlin.coroutines.resume
 
 class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
 
+    // ── Local cache — survives crash/restart until billing reconnects ─────────
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("yatrain_sub", Context.MODE_PRIVATE)
+
+    private fun cacheIsPro(): Boolean = prefs.getBoolean("is_pro", false)
+    private fun persistPro(isPro: Boolean) = prefs.edit().putBoolean("is_pro", isPro).apply()
+
     // ── State ─────────────────────────────────────────────────────────────────
 
-    private val _tier = MutableStateFlow(SubscriptionTier.FREE)
+    // Initialise from cache so returning users never see FREE on app restart
+    private val _tier = MutableStateFlow(
+        if (cacheIsPro()) SubscriptionTier.PRO else SubscriptionTier.FREE
+    )
     val tier: StateFlow<SubscriptionTier> = _tier.asStateFlow()
 
     private val _purchaseLoading = MutableStateFlow(false)
@@ -157,6 +168,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         scope.launch {
             delay(900)                          // mimic network round-trip
             _tier.value            = SubscriptionTier.PRO
+            persistPro(true)
             _purchaseLoading.value = false
         }
     }
@@ -221,6 +233,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
                 }
                 if (isYatrainPro) {
                     _tier.value = SubscriptionTier.PRO
+                    persistPro(true)
                     acknowledgeIfNeeded(purchase)
                 }
             }
@@ -250,6 +263,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         }
 
         _tier.value = if (hasPro) SubscriptionTier.PRO else SubscriptionTier.FREE
+        persistPro(hasPro)  // keep cache in sync — clears PRO if subscription expired
 
         // Acknowledge any unacknowledged Pro purchases
         result.purchasesList

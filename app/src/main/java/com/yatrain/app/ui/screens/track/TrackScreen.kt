@@ -113,9 +113,12 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
     val showingPopularTrains by viewModel.showingPopularTrains.collectAsStateWithLifecycle()
     val stationSuggestions   by viewModel.stationSuggestions.collectAsStateWithLifecycle()
     val trainSuggestions     by viewModel.trainSuggestions.collectAsStateWithLifecycle()
+    val pnrHintQuery         by viewModel.pnrHintQuery.collectAsStateWithLifecycle()
     val currentStop     by viewModel.currentStopIndex.collectAsStateWithLifecycle()
     val isTrainSaved    by viewModel.isTrainSaved.collectAsStateWithLifecycle()
     val pnrContext      by viewModel.pnrContext.collectAsStateWithLifecycle()
+    val liveDelay       by viewModel.liveDelay.collectAsStateWithLifecycle()
+    val liveSpeed       by viewModel.liveSpeed.collectAsStateWithLifecycle()
 
     val keyboardController  = LocalSoftwareKeyboardController.current
     val focusManager        = LocalFocusManager.current
@@ -137,7 +140,7 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
     )
 
     // System back: clear result/suggestions before leaving the tab
-    BackHandler(enabled = hasResult || stationSuggestions.isNotEmpty() || trainSuggestions.isNotEmpty()) {
+    BackHandler(enabled = hasResult || stationSuggestions.isNotEmpty() || trainSuggestions.isNotEmpty() || pnrHintQuery != null) {
         viewModel.clearResult()
         focusManager.clearFocus()
     }
@@ -258,6 +261,21 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                 }
             }
 
+            // ── PNR search chip — shown when user types a 10-digit PNR ───────
+            if (pnrHintQuery != null) {
+                item {
+                    PnrSearchChip(
+                        pnr      = pnrHintQuery!!,
+                        onClick  = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            viewModel.search()
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
             // ── Pro banner ───────────────────────────────────────────────────
             if (!hasResult) {
                 item {
@@ -296,6 +314,16 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
 
             // ── Train found: detail view ──────────────────────────────────────
             if (hasResult) {
+                // AI Journey Companion card
+                item {
+                    AiJourneyCompanionCard(
+                        schedule         = schedule,
+                        currentStopIndex = currentStop,
+                        delayMin         = liveDelay,
+                        modifier         = Modifier.padding(horizontal = 18.dp, vertical = 6.dp)
+                    )
+                }
+
                 // Live status card
                 item {
                     LiveStatusCard(
@@ -305,6 +333,8 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
                         isSaved           = isTrainSaved,
                         isPro             = isPro,
                         currentStopIndex  = currentStop,
+                        delayMin          = liveDelay,
+                        speedKmh          = liveSpeed,
                         alertedStations   = alerted,
                         onAlertToggle     = { station ->
                             if (alerted.contains(station.code)) viewModel.cancelStationAlert(station)
@@ -543,6 +573,214 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
     }
 }
 
+// ── AI Journey Companion card ─────────────────────────────────────────────────
+
+private fun timeGreeting(): Pair<String, String> {
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    return when (hour) {
+        in  5..11 -> "Good morning!" to "🌅"
+        in 12..16 -> "Good afternoon!" to "☀️"
+        in 17..20 -> "Good evening!" to "🌆"
+        else      -> "Good night!" to "🌙"
+    }
+}
+
+private fun formatArrivalTime(timeStr: String): String {
+    if (timeStr.isBlank() || timeStr == "–" || timeStr == "-" || timeStr == "First" || timeStr == "Last") return "–"
+    return timeStr.replace("+1", "").replace(".", ":").trim()
+}
+
+private fun addDelay(timeStr: String, delayMin: Int): String {
+    if (timeStr.isBlank() || timeStr == "–" || timeStr == "-" ||
+        timeStr == "First" || timeStr == "Last" || delayMin == 0) return timeStr
+    return try {
+        val clean = timeStr.replace("+1", "").replace(".", ":").trim()
+        val parts = clean.split(":")
+        val totalMin = (parts[0].trim().toInt() * 60 + parts[1].trim().toInt() + delayMin) % (24 * 60)
+        "%02d:%02d".format(totalMin / 60, totalMin % 60)
+    } catch (_: Exception) { timeStr }
+}
+
+@Composable
+private fun AiJourneyCompanionCard(
+    schedule:         List<Station>,
+    currentStopIndex: Int,
+    delayMin:         Int = 0,
+    modifier:         Modifier = Modifier
+) {
+    val nextStation = schedule.getOrNull(currentStopIndex + 1)
+        ?: schedule.getOrNull(currentStopIndex)
+    val (greeting, greetingIcon) = remember { timeGreeting() }
+
+    val scheduledArrival = remember(nextStation) {
+        nextStation?.arrival?.let { formatArrivalTime(it) }
+            ?: nextStation?.departure?.let { formatArrivalTime(it) }
+            ?: "–"
+    }
+    // Real ETA = scheduled arrival + current delay
+    val eta = remember(scheduledArrival, delayMin) { addDelay(scheduledArrival, delayMin) }
+
+    val platformDisplay = remember(nextStation) {
+        val p = nextStation?.platform?.trim() ?: ""
+        if (p.isBlank() || p == "0" || p == "–" || p == "-") "–" else p
+    }
+
+    Card(
+        modifier  = modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(18.dp),
+        colors    = CardDefaults.cardColors(containerColor = AppNavy),
+        elevation = CardDefaults.cardElevation(6.dp)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // ── Header row: sparkle + label + greeting ─────────────────────
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(AppOrange.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✦", fontSize = 18.sp, color = AppOrange)
+                }
+                Column(Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            "AI JOURNEY COMPANION",
+                            fontSize      = 9.sp,
+                            fontWeight    = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color         = Color.White.copy(0.55f)
+                        )
+                        Text("★★★★★", fontSize = 9.sp, color = Color(0xFFFFD700))
+                    }
+                    Text(
+                        "$greetingIcon  $greeting",
+                        fontSize   = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color      = Color.White
+                    )
+                }
+            }
+
+            // ── 3-tile row ─────────────────────────────────────────────────
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Tile 1 — Next Stop with real ETA
+                AiInfoTile(
+                    icon     = Icons.Outlined.Train,
+                    label    = "NEXT STOP",
+                    value    = nextStation?.name ?: "–",
+                    sub      = when {
+                        eta == "–"   -> null
+                        delayMin > 0 -> "ETA $eta (+${delayMin}m)"
+                        else         -> "Arrives $eta"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                // Tile 2 — Temperature placeholder (weather API can wire here later)
+                AiInfoTile(
+                    icon     = Icons.Outlined.WbSunny,
+                    label    = "TEMP",
+                    value    = "–°C",
+                    sub      = nextStation?.name?.take(10),
+                    modifier = Modifier.weight(1f)
+                )
+                // Tile 3 — Platform number
+                AiInfoTile(
+                    icon     = Icons.Outlined.GridOn,
+                    label    = "PLATFORM",
+                    value    = if (platformDisplay == "–") "–" else "Plt $platformDisplay",
+                    sub      = if (platformDisplay == "–") "Not available" else null,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiInfoTile(
+    icon:     ImageVector,
+    label:    String,
+    value:    String,
+    sub:      String?,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(icon, null, tint = AppOrange, modifier = Modifier.size(14.dp))
+        Text(label, fontSize = 8.sp, color = Color.White.copy(0.5f), letterSpacing = 0.8.sp, fontWeight = FontWeight.Bold)
+        Text(
+            value,
+            fontSize   = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color      = Color.White,
+            maxLines   = 1,
+            overflow   = TextOverflow.Ellipsis
+        )
+        if (sub != null) {
+            Text(sub, fontSize = 9.sp, color = Color.White.copy(0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+// ── PNR search chip ───────────────────────────────────────────────────────────
+
+@Composable
+private fun PnrSearchChip(pnr: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Card(
+        modifier  = modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = AppCard),
+        border    = BorderStroke(1.dp, AppBorder),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication        = null,
+                    onClick           = onClick
+                )
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(AppOrange.copy(0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.ConfirmationNumber, null, tint = AppOrange, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Search PNR", fontSize = 11.sp, color = AppMuted, letterSpacing = 0.5.sp)
+                Text(pnr, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppNavy)
+            }
+            Icon(Icons.Default.ArrowForward, null, tint = AppOrange, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
 // ── Live Status Card ──────────────────────────────────────────────────────────
 
 @Composable
@@ -553,6 +791,8 @@ private fun LiveStatusCard(
     isSaved:          Boolean,
     isPro:            Boolean = true,
     currentStopIndex: Int = 0,
+    delayMin:         Int = 0,
+    speedKmh:         Int = 0,
     alertedStations:  Set<String> = emptySet(),
     onAlertToggle:    (Station) -> Unit = {},
     onSaveTrain:      () -> Unit,
@@ -692,12 +932,22 @@ private fun LiveStatusCard(
                     }
                 }
                 if (nextStation != null) {
+                    val nextEta = addDelay(
+                        nextStation.arrival.ifBlank { nextStation.departure }.replace(".", ":"),
+                        delayMin
+                    )
+                    val nextPlt = nextStation.platform.trim().let { if (it.isBlank() || it == "0") "–" else it }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(sLsc.nextStop, fontSize = 10.sp, color = AppMuted)
                         Text(nextStation.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppNavy)
                         Text(
-                            "${nextStation.departure.replace(".", ":")}  ·  Plt –",
-                            fontSize = 11.sp, color = AppMuted
+                            buildString {
+                                append(nextEta)
+                                if (delayMin > 0) append(" +${delayMin}m")
+                                append("  ·  Plt $nextPlt")
+                            },
+                            fontSize = 11.sp,
+                            color    = if (delayMin > 0) AppOrange else AppMuted
                         )
                     }
                 }
@@ -706,13 +956,19 @@ private fun LiveStatusCard(
             Spacer(Modifier.height(14.dp))
 
             // ── Stats row ─────────────────────────────────────────────────
+            val delayLabel = when {
+                delayMin > 0 -> "+${delayMin}m"
+                delayMin < 0 -> "${delayMin}m"
+                else         -> "On time"
+            }
+            val delayColor = if (delayMin > 0) AppOrange else AppGreen
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                StatPill(sLsc.speedLabel,    "0 km/h",  Modifier.weight(1f))
-                StatPill(sLsc.progressLabel, "0%",       Modifier.weight(1f))
-                StatPill(sLsc.statusLabelShort, "+17m",  Modifier.weight(1f), valueColor = AppOrange)
+                StatPill(sLsc.speedLabel,       if (speedKmh > 0) "$speedKmh km/h" else "– km/h", Modifier.weight(1f))
+                StatPill(sLsc.progressLabel,    "Live", Modifier.weight(1f))
+                StatPill(sLsc.statusLabelShort, delayLabel, Modifier.weight(1f), valueColor = delayColor)
             }
 
             Spacer(Modifier.height(12.dp))

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -221,47 +222,111 @@ private fun upcomingStationBitmap(alerted: Boolean): Bitmap {
     return bmp
 }
 
-// ── Train marker bitmap (drawn programmatically so centre is exact) ───────────
-// Front (nose) at TOP of image. Anchor (0.5f, 0.5f) = bitmap centre = geographic position.
-// This guarantees the train sits ON the polyline at every zoom level regardless of PNG padding.
+// ── Train marker bitmap — top-down view, 100 × 100 px ────────────────────────
+//
+//   Nose (▲) at the TOP of the bitmap → points in the direction of travel when
+//   the Marker uses  flat=true, rotation=heading, anchor=(0.5f,0.5f).
+//   The bitmap is exactly 100×100 so anchor(0.5f,0.5f) = pixel(50,50) = body
+//   centre = sits precisely on the polyline at every zoom level.
+//
+//   Layout (top → bottom):
+//     12 px  transparent padding
+//     16 px  orange pointed nose
+//      3 px  red accent stripe
+//     22 px  upper coach body + 2 windows
+//      3 px  inter-coach gap (darker)
+//     22 px  lower coach body + 2 windows
+//      3 px  red accent stripe (tail)
+//     16 px  rounded tail cap
+//     12 px  transparent padding  (total: 12+16+3+22+3+22+3+16+12 = 109 ≈ 100 px adjusted below)
+//
 private fun trainMarkerBitmap(): Bitmap {
-    val w = 30; val h = 80
-    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val S  = 100
+    val bmp = Bitmap.createBitmap(S, S, Bitmap.Config.ARGB_8888)
     val cv  = Canvas(bmp)
     val p   = Paint(Paint.ANTI_ALIAS_FLAG)
-    val pad = 2f; val cr = 6f
 
-    // White body
-    p.color = android.graphics.Color.WHITE; p.style = Paint.Style.FILL
-    cv.drawRoundRect(RectF(pad, pad, w - pad, h - pad), cr, cr, p)
+    // ── Geometry ──────────────────────────────────────────────────────────────
+    val cx  = S / 2f
+    val bW  = 30f                     // body width
+    val bH  = 78f                     // body height (fits inside 100 px with 11 px padding each side)
+    val bL  = cx - bW / 2f
+    val bR  = cx + bW / 2f
+    val bT  = (S - bH) / 2f          // 11 px
+    val bB  = bT + bH                 // 89 px
+    val cr  = bW / 2f                 // fully-rounded pill ends
 
-    // Orange nose band at top
-    p.color = android.graphics.Color.rgb(255, 107, 0)
-    cv.drawRoundRect(RectF(pad, pad, w - pad, pad + 13f), cr, cr, p)
-    p.color = android.graphics.Color.WHITE   // cut straight bottom edge of orange band
-    cv.drawRect(pad, pad + 7f, w - pad, pad + 13f, p)
+    val noseH   = 18f                 // orange nose cap height
+    val stripeH = 3.5f                // red stripe height
+    val coachH  = (bH - noseH - stripeH * 2 - 4f) / 2f  // ~24 px per coach
+    val gapH    = 4f                  // inter-coach gap
 
-    // Coach separator at midpoint
-    p.color = android.graphics.Color.rgb(200, 200, 200)
-    p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f
-    cv.drawLine(pad + 1f, h / 2f, w - pad - 1f, h / 2f, p)
+    // ── Drop shadow ───────────────────────────────────────────────────────────
+    p.color = android.graphics.Color.argb(55, 0, 0, 0)
+    cv.drawRoundRect(RectF(bL + 2f, bT + 3f, bR + 2f, bB + 3f), cr, cr, p)
 
-    // Windows — 2 per coach on each side
-    p.color = android.graphics.Color.rgb(120, 170, 225); p.style = Paint.Style.FILL
-    val wW = w * 0.26f; val wH = 5.5f; val wCr = 2f
-    for (wy in listOf(h * 0.21f, h * 0.33f))  {          // upper coach
-        cv.drawRoundRect(RectF(pad + 2f, wy, pad + 2f + wW, wy + wH), wCr, wCr, p)
-        cv.drawRoundRect(RectF(w - pad - 2f - wW, wy, w - pad - 2f, wy + wH), wCr, wCr, p)
-    }
-    for (wy in listOf(h * 0.58f, h * 0.70f)) {           // lower coach
-        cv.drawRoundRect(RectF(pad + 2f, wy, pad + 2f + wW, wy + wH), wCr, wCr, p)
-        cv.drawRoundRect(RectF(w - pad - 2f - wW, wy, w - pad - 2f, wy + wH), wCr, wCr, p)
-    }
+    // ── Body base (light silver) ──────────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(235, 238, 242)
+    cv.drawRoundRect(RectF(bL, bT, bR, bB), cr, cr, p)
 
-    // Outline
-    p.color = android.graphics.Color.rgb(90, 90, 90)
-    p.style = Paint.Style.STROKE; p.strokeWidth = 1.5f
-    cv.drawRoundRect(RectF(pad, pad, w - pad, h - pad), cr, cr, p)
+    // ── Orange nose cap (pointed pill-end, top) ───────────────────────────────
+    p.color = android.graphics.Color.rgb(255, 107, 0)   // brand orange
+    cv.save()
+    cv.clipRect(bL, bT, bR, bT + noseH)
+    cv.drawRoundRect(RectF(bL, bT, bR, bT + cr * 2f), cr, cr, p)
+    cv.restore()
+
+    // ── Headlight dots on nose ────────────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(255, 240, 180)  // warm yellow-white
+    val hlY = bT + noseH * 0.55f
+    val hlR = 2.2f
+    cv.drawCircle(cx - bW * 0.22f, hlY, hlR, p)
+    cv.drawCircle(cx + bW * 0.22f, hlY, hlR, p)
+
+    // ── Red accent stripe below nose ──────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(190, 30, 30)
+    val s1T = bT + noseH
+    cv.drawRect(bL, s1T, bR, s1T + stripeH, p)
+
+    // ── Upper coach ───────────────────────────────────────────────────────────
+    val uc_T = s1T + stripeH
+    val uc_B = uc_T + coachH
+
+    // Window pair — upper coach
+    val wW = 7f; val wH = 11f; val wCr = 2f
+    p.color = android.graphics.Color.rgb(110, 170, 228)   // window blue
+    val ucWY = uc_T + coachH * 0.45f
+    cv.drawRoundRect(RectF(bL + 4.5f, ucWY - wH/2, bL + 4.5f + wW, ucWY + wH/2), wCr, wCr, p)
+    cv.drawRoundRect(RectF(bR - 4.5f - wW, ucWY - wH/2, bR - 4.5f, ucWY + wH/2), wCr, wCr, p)
+
+    // ── Inter-coach coupler gap (dark band) ───────────────────────────────────
+    p.color = android.graphics.Color.rgb(155, 160, 168)
+    cv.drawRect(bL, uc_B, bR, uc_B + gapH, p)
+
+    // ── Lower coach ───────────────────────────────────────────────────────────
+    val lc_T = uc_B + gapH
+    val lc_B = lc_T + coachH
+
+    val lcWY = lc_T + coachH * 0.45f
+    p.color = android.graphics.Color.rgb(110, 170, 228)
+    cv.drawRoundRect(RectF(bL + 4.5f, lcWY - wH/2, bL + 4.5f + wW, lcWY + wH/2), wCr, wCr, p)
+    cv.drawRoundRect(RectF(bR - 4.5f - wW, lcWY - wH/2, bR - 4.5f, lcWY + wH/2), wCr, wCr, p)
+
+    // ── Red accent stripe above tail ──────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(190, 30, 30)
+    val s2T = lc_B
+    cv.drawRect(bL, s2T, bR, s2T + stripeH, p)
+
+    // ── Tail light dots ───────────────────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(220, 60, 60)   // red tail-lights
+    val tlY = bB - noseH * 0.55f
+    cv.drawCircle(cx - bW * 0.22f, tlY, hlR, p)
+    cv.drawCircle(cx + bW * 0.22f, tlY, hlR, p)
+
+    // ── Body outline ──────────────────────────────────────────────────────────
+    p.color = android.graphics.Color.rgb(65, 70, 80)
+    p.style = Paint.Style.STROKE; p.strokeWidth = 2f
+    cv.drawRoundRect(RectF(bL, bT, bR, bB), cr, cr, p)
 
     return bmp
 }
@@ -542,17 +607,19 @@ fun LiveMapSheet(
                         }
                     }
 
-                    // Animated train marker — icon stays null (default pin) until MapEffect sets it
+                    // Animated train marker — flat=true keeps icon glued to the map surface
+                    // (rotates with the map); rotation=heading points the nose toward travel direction.
+                    // anchor(0.5f,0.5f) = bitmap centre = body centre = exactly on the polyline.
                     if (coords.size >= 2) {
                         Marker(
                             state    = markerState,
                             title    = trainNumber,
                             snippet  = schedule.getOrNull(currentStopIndex)?.name ?: "",
-                            icon     = trainIcon,   // null → default marker; no BitmapDescriptorFactory call outside MapEffect
+                            icon     = trainIcon,   // null → default pin until MapEffect fires
                             rotation = heading,
                             flat     = true,
                             anchor   = Offset(0.5f, 0.5f),
-                            zIndex   = 2f
+                            zIndex   = 3f
                         )
                     }
                 }

@@ -1,6 +1,7 @@
 package com.yatrain.app.ui.screens.subscription
 
 import android.app.Activity
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,7 +66,14 @@ fun ProPaywallSheet(
     onDismiss: () -> Unit
 ) {
     val context         = LocalContext.current
-    val activity        = context as? Activity
+    val activity        = remember(context) {
+        var ctx = context
+        while (ctx is ContextWrapper) {
+            if (ctx is Activity) return@remember ctx
+            ctx = ctx.baseContext
+        }
+        null
+    }
     val tier            by viewModel.tier.collectAsStateWithLifecycle()
     val isPro           = tier == SubscriptionTier.PRO
     val isLoading       by viewModel.purchaseLoading.collectAsStateWithLifecycle()

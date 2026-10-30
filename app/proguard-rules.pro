@@ -39,3 +39,13 @@
 -keep class com.google.maps.android.** { *; }
 -dontwarn com.google.maps.**
 -dontwarn com.google.android.gms.maps.**
+
+# Google ML Kit Translation
+# ML Kit ships consumer rules in its AAR but keep explicitly to be safe
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_translate.** { *; }
+-dontwarn com.google.mlkit.**
+
+# kotlinx-coroutines-play-services — Task<T>.await() extension
+-keep class kotlinx.coroutines.tasks.** { *; }
+-dontwarn kotlinx.coroutines.tasks.**

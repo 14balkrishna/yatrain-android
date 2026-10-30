@@ -7,9 +7,9 @@ object Constants {
     // Supabase
     const val OAUTH_REDIRECT = "yatrain://auth-callback"
 
-    // Google Play product IDs (mirror iOS)
-    const val MONTHLY_PRODUCT_ID = "pro.monthly"
-    const val ANNUAL_PRODUCT_ID  = "pro.annual"
+    // Google Play product IDs — must match exactly what's in Play Console
+    const val MONTHLY_PRODUCT_ID = "com.yatrain.app.pro.monthly"
+    const val ANNUAL_PRODUCT_ID  = "com.yatrain.app.pro.annual"
 
     // Legal URLs
     const val PRIVACY_URL = "https://yatrain.com/privacy.html"
