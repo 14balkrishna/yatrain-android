@@ -53,8 +53,8 @@ private val proFeatures = listOf(
     ProFeature(Icons.Outlined.BarChart,           "Travel Analytics",       freeHas = false),
     ProFeature(Icons.Outlined.Download,           "Offline Journeys",       freeHas = false),
     ProFeature(Icons.Outlined.Group,              "Family Sharing",         freeHas = false),
-    ProFeature(Icons.Outlined.GraphicEq,          "Live Activities",        freeHas = false),
-    ProFeature(Icons.Outlined.RadioButtonUnchecked, "Dynamic Island",       freeHas = false),
+    ProFeature(Icons.Outlined.Widgets,            "Home Screen Widget",     freeHas = false),
+    ProFeature(Icons.Outlined.Notifications,      "Smart Alerts",           freeHas = false),
 )
 
 // ── Sheet ─────────────────────────────────────────────────────────────────────
