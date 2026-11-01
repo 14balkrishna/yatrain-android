@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Yatrain" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Yatrain" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Transparent bars — enableEdgeToEdge() manages insets at runtime -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Use "default" cutout mode; "shortEdges" is deprecated in API 35 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
 
     <style name="Theme.Yatrain.SplashScreen" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#0B1733</item>
@@ -9,5 +15,10 @@
         <item name="postSplashScreenTheme">@style/Theme.Yatrain</item>
     </style>
 
-    <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
+
 </resources>

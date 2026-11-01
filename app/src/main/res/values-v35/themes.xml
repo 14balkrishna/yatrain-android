@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Android 15 (API 35) enforces edge-to-edge by default.
+        statusBarColor and navigationBarColor are deprecated and must NOT be set —
+        the system ignores them and enableEdgeToEdge() handles inset management.
+    -->
+    <style name="Theme.Yatrain" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
+
+    <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowLayoutInDisplayCutoutMode">default</item>
+    </style>
+
+</resources>
