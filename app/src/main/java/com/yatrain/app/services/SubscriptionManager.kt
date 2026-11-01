@@ -51,8 +51,8 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
     private val _purchaseError = MutableStateFlow<String?>(null)
     val purchaseError: StateFlow<String?> = _purchaseError.asStateFlow()
 
-    private var monthlyProduct: ProductDetails? = null
-    private var annualProduct:  ProductDetails? = null
+    // Single product with monthly-base and yatrain-base-yearly base plans
+    private var proProduct: ProductDetails? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -112,11 +112,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
             .setProductList(
                 listOf(
                     QueryProductDetailsParams.Product.newBuilder()
-                        .setProductId(Constants.MONTHLY_PRODUCT_ID)
-                        .setProductType(BillingClient.ProductType.SUBS)
-                        .build(),
-                    QueryProductDetailsParams.Product.newBuilder()
-                        .setProductId(Constants.ANNUAL_PRODUCT_ID)
+                        .setProductId(Constants.SUBSCRIPTION_PRODUCT_ID)
                         .setProductType(BillingClient.ProductType.SUBS)
                         .build()
                 )
@@ -124,41 +120,39 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
 
         val result = billingClient.queryProductDetails(params)
         if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            monthlyProduct = result.productDetailsList?.firstOrNull {
-                it.productId == Constants.MONTHLY_PRODUCT_ID
-            }
-            annualProduct = result.productDetailsList?.firstOrNull {
-                it.productId == Constants.ANNUAL_PRODUCT_ID
+            proProduct = result.productDetailsList?.firstOrNull {
+                it.productId == Constants.SUBSCRIPTION_PRODUCT_ID
             }
         }
     }
 
-    // Returns the cheapest (base) offer token for a product
-    private fun ProductDetails.baseOfferToken(): String? =
+    // Returns the offer token for a specific base plan ID
+    private fun ProductDetails.offerTokenForBasePlan(basePlanId: String): String? =
         subscriptionOfferDetails
-            ?.sortedBy { it.pricingPhases.pricingPhaseList.firstOrNull()?.priceAmountMicros ?: Long.MAX_VALUE }
-            ?.firstOrNull()
+            ?.firstOrNull { it.basePlanId == basePlanId }
             ?.offerToken
 
     fun getMonthlyPrice(): String =
-        monthlyProduct?.subscriptionOfferDetails
-            ?.firstOrNull()?.pricingPhases?.pricingPhaseList?.firstOrNull()
+        proProduct?.subscriptionOfferDetails
+            ?.firstOrNull { it.basePlanId == Constants.MONTHLY_BASE_PLAN_ID }
+            ?.pricingPhases?.pricingPhaseList?.firstOrNull()
             ?.formattedPrice ?: "₹49"
 
     fun getAnnualPrice(): String =
-        annualProduct?.subscriptionOfferDetails
-            ?.firstOrNull()?.pricingPhases?.pricingPhaseList?.firstOrNull()
+        proProduct?.subscriptionOfferDetails
+            ?.firstOrNull { it.basePlanId == Constants.ANNUAL_BASE_PLAN_ID }
+            ?.pricingPhases?.pricingPhaseList?.firstOrNull()
             ?.formattedPrice ?: "₹599"
 
     // ── Purchase ──────────────────────────────────────────────────────────────
 
     fun purchaseMonthly(activity: Activity) {
         if (BuildConfig.DEBUG) { simulatePurchase(); return }
-        launchBillingFlow(activity, monthlyProduct)
+        launchBillingFlow(activity, proProduct, Constants.MONTHLY_BASE_PLAN_ID)
     }
     fun purchaseAnnual(activity: Activity) {
         if (BuildConfig.DEBUG) { simulatePurchase(); return }
-        launchBillingFlow(activity, annualProduct)
+        launchBillingFlow(activity, proProduct, Constants.ANNUAL_BASE_PLAN_ID)
     }
 
     // Debug-only: simulates a successful purchase without Play Console
@@ -173,12 +167,12 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         }
     }
 
-    private fun launchBillingFlow(activity: Activity, product: ProductDetails?) {
+    private fun launchBillingFlow(activity: Activity, product: ProductDetails?, basePlanId: String) {
         if (product == null) {
             _purchaseError.value = "Product unavailable. Check your internet connection."
             return
         }
-        val offerToken = product.baseOfferToken()
+        val offerToken = product.offerTokenForBasePlan(basePlanId)
         if (offerToken == null) {
             _purchaseError.value = "No active offer found for this product."
             return
@@ -229,7 +223,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         when (purchase.purchaseState) {
             Purchase.PurchaseState.PURCHASED -> {
                 val isYatrainPro = purchase.products.any {
-                    it == Constants.MONTHLY_PRODUCT_ID || it == Constants.ANNUAL_PRODUCT_ID
+                    it == Constants.SUBSCRIPTION_PRODUCT_ID
                 }
                 if (isYatrainPro) {
                     _tier.value = SubscriptionTier.PRO
@@ -257,9 +251,7 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         val result = billingClient.queryPurchasesAsync(params)
         val hasPro = result.purchasesList.any { purchase ->
             purchase.purchaseState == Purchase.PurchaseState.PURCHASED &&
-            purchase.products.any {
-                it == Constants.MONTHLY_PRODUCT_ID || it == Constants.ANNUAL_PRODUCT_ID
-            }
+            purchase.products.any { it == Constants.SUBSCRIPTION_PRODUCT_ID }
         }
 
         _tier.value = if (hasPro) SubscriptionTier.PRO else SubscriptionTier.FREE
