@@ -31,6 +31,11 @@ data class AppStrings(
     val findYourCoach: String,
 
     // ── Search screen ─────────────────────────────────────────────────────
+    val tabTrain: String,
+    val tabTicketPlus: String,
+    val stationCodeHint: String,
+    val findButton: String,
+    val trainsFound: String,
     val noTrainsFound: String,
     val partnerOffers: String,
     val ads: String,

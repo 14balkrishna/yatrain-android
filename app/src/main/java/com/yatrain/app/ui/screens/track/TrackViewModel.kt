@@ -28,6 +28,7 @@ import com.yatrain.app.services.SavedDataRepository
 import com.yatrain.app.services.StationAlertReceiver
 import com.yatrain.app.services.TrainAPIService
 import com.yatrain.app.i18n.MlKitTranslator
+import com.yatrain.app.i18n.sanitized
 import com.yatrain.app.i18n.withTranslatedNames
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -102,7 +103,7 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
     private val _pnrContext = MutableStateFlow<PNRStatus?>(null)
     val pnrContext: StateFlow<PNRStatus?> = _pnrContext.asStateFlow()
 
-    fun setPNRContext(pnr: PNRStatus?) { _pnrContext.value = pnr }
+    fun setPNRContext(pnr: PNRStatus?) { _pnrContext.value = pnr?.sanitized() }
 
     private var searchJob: Job? = null
 
@@ -156,16 +157,23 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _liveTrains.value = emptyList()
         _error.value = null
         viewModelScope.launch {
-            withTimeoutOrNull(15_000L) {
-                val r = api.getStationTrains(station.code)
-                val trains = r.getOrNull()
-                if (trains != null) {
-                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
-                } else {
-                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
+            try {
+                withTimeoutOrNull(40_000L) {
+                    val r = api.getTrainsAtStation(station.code)
+                    val trains = r.getOrNull()
+                    if (trains != null) {
+                        _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                    } else {
+                        _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _error.value = "Could not load trains. Check your connection."
+            } finally {
+                _isLocating.value = false
             }
-            _isLocating.value = false
         }
     }
 
@@ -191,16 +199,23 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _error.value = null
         viewModelScope.launch {
             _isLocating.value = true
-            withTimeoutOrNull(15_000L) {
-                val r = api.getStationTrains(station.code)
-                val trains = r.getOrNull()
-                if (trains != null && trains.isNotEmpty()) {
-                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
-                } else if (trains == null) {
-                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
+            try {
+                withTimeoutOrNull(40_000L) {
+                    val r = api.getTrainsAtStation(station.code)
+                    val trains = r.getOrNull()
+                    if (trains != null && trains.isNotEmpty()) {
+                        _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                    } else if (trains == null) {
+                        _error.value = r.exceptionOrNull().toUserMessage("Could not load trains. Check your connection.")
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _error.value = "Could not load trains. Check your connection."
+            } finally {
+                _isLocating.value = false
             }
-            _isLocating.value = false
         }
     }
 
@@ -288,16 +303,23 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         _detectedStation.value = station
         _liveTrains.value = emptyList()
         viewModelScope.launch {
-            withTimeoutOrNull(15_000L) {
-                val r = api.getStationTrains(station.code)
-                val trains = r.getOrNull()
-                if (trains != null && trains.isNotEmpty()) {
-                    _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
-                } else if (trains == null) {
-                    _error.value = r.exceptionOrNull().toUserMessage("Could not load trains for ${station.name}.")
+            try {
+                withTimeoutOrNull(40_000L) {
+                    val r = api.getTrainsAtStation(station.code)
+                    val trains = r.getOrNull()
+                    if (trains != null && trains.isNotEmpty()) {
+                        _liveTrains.value = trains.map { mapApiTrain(it) }.withTranslatedNames()
+                    } else if (trains == null) {
+                        _error.value = r.exceptionOrNull().toUserMessage("Could not load trains for ${station.name}.")
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _error.value = "Could not load trains for ${station.name}."
+            } finally {
+                _isLocating.value = false
             }
-            _isLocating.value = false
         }
     }
 
@@ -332,48 +354,54 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
         }
         _isLoading.value = true; _error.value = null; _trainResult.value = null; _schedule.value = emptyList()
         _liveDelay.value = 0; _liveSpeed.value = 0
-
-        val searchR = api.searchTrains(trainNumber)
-        val firstTrain = searchR.getOrNull()?.firstOrNull()
-        if (firstTrain != null) {
-            _trainResult.value = firstTrain.copy(
-                name        = MlKitTranslator.translate(firstTrain.name),
-                source      = MlKitTranslator.translate(firstTrain.source),
-                destination = MlKitTranslator.translate(firstTrain.destination)
-            )
-        } else {
-            _error.value = searchR.exceptionOrNull().toUserMessage("Train \"$trainNumber\" not found.")
-        }
-
-        if (_trainResult.value != null) {
-            // Fetch schedule and live status in parallel — live status failure is non-fatal
-            coroutineScope {
-                val schedDeferred = async { api.getSchedule(trainNumber) }
-                val liveDeferred  = async { api.getLiveStatus(trainNumber) }
-
-                val ts   = schedDeferred.await().getOrNull()
-                val live = liveDeferred.await().getOrNull()
-
-                if (live != null) {
-                    _liveDelay.value = live.delay.coerceAtLeast(0)
-                    _liveSpeed.value = live.speed.coerceAtLeast(0)
-                }
-
-                if (ts != null) {
-                    val translated = ts.route.withTranslatedNames()
-                    _schedule.value = translated
-                    // Prefer live station code for accuracy; fall back to time-based heuristic
-                    val liveCode = live?.currentStationCode.orEmpty()
-                    val liveIdx  = if (liveCode.isNotBlank())
-                        translated.indexOfFirst { it.code.equals(liveCode, ignoreCase = true) }
-                    else -1
-                    _currentStopIndex.value = if (liveIdx >= 0) liveIdx
-                        else computeCurrentStop(translated, _liveDelay.value)
-                }
+        try {
+            val searchR = api.searchTrains(trainNumber)
+            val firstTrain = searchR.getOrNull()?.firstOrNull()
+            if (firstTrain != null) {
+                _trainResult.value = firstTrain.copy(
+                    name        = MlKitTranslator.translate(firstTrain.name.orEmpty()),
+                    source      = MlKitTranslator.translate(firstTrain.source.orEmpty()),
+                    destination = MlKitTranslator.translate(firstTrain.destination.orEmpty())
+                )
+            } else {
+                _error.value = searchR.exceptionOrNull().toUserMessage("Train \"$trainNumber\" not found.")
             }
-            _isTrainSaved.value = repo.isTrainSaved(userId(), trainNumber)
+
+            if (_trainResult.value != null) {
+                // Fetch schedule and live status in parallel — live status failure is non-fatal
+                coroutineScope {
+                    val schedDeferred = async { api.getSchedule(trainNumber) }
+                    val liveDeferred  = async { api.getLiveStatus(trainNumber) }
+
+                    val ts   = schedDeferred.await().getOrNull()
+                    val live = liveDeferred.await().getOrNull()
+
+                    if (live != null) {
+                        _liveDelay.value = live.delay.coerceAtLeast(0)
+                        _liveSpeed.value = live.speed.coerceAtLeast(0)
+                    }
+
+                    if (ts != null) {
+                        val translated = (ts.route ?: emptyList()).withTranslatedNames()
+                        _schedule.value = translated
+                        // Prefer live station code for accuracy; fall back to time-based heuristic
+                        val liveCode = live?.currentStationCode.orEmpty()
+                        val liveIdx  = if (liveCode.isNotBlank())
+                            translated.indexOfFirst { it.code.equals(liveCode, ignoreCase = true) }
+                        else -1
+                        _currentStopIndex.value = if (liveIdx >= 0) liveIdx
+                            else computeCurrentStop(translated, _liveDelay.value)
+                    }
+                }
+                _isTrainSaved.value = repo.isTrainSaved(userId(), trainNumber)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            _error.value = "Something went wrong. Please try again."
+        } finally {
+            _isLoading.value = false
         }
-        _isLoading.value = false
     }
 
     // Fetches a PNR, then chains into fetch() to load the full train+schedule view.
@@ -390,9 +418,10 @@ class TrackViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        _pnrContext.value = status.withTranslatedNames()
+        val sanitized = status.sanitized()
+        _pnrContext.value = sanitized.withTranslatedNames()
 
-        val trainNo = status.trainNumber.trim().filter { it.isDigit() }
+        val trainNo = sanitized.trainNumber.trim().filter { it.isDigit() }
         if (trainNo.isBlank()) {
             _error.value = "Train number not available for this PNR"
             _isLoading.value = false

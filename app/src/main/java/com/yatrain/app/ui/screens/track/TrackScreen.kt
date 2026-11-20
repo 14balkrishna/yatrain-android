@@ -527,6 +527,13 @@ fun TrackScreen(viewModel: TrackViewModel = viewModel()) {
             }
 
             item {
+                com.yatrain.app.ui.components.AdBannerCarousel(
+                    isPro    = isPro,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+
+            item {
                 Spacer(Modifier.height(12.dp))
                 Text(
                     LocalStrings.current.enterTrainNumberHint,
@@ -933,13 +940,13 @@ private fun LiveStatusCard(
                 }
                 if (nextStation != null) {
                     val nextEta = addDelay(
-                        nextStation.arrival.ifBlank { nextStation.departure }.replace(".", ":"),
+                        nextStation.arrival.orEmpty().ifBlank { nextStation.departure.orEmpty() }.replace(".", ":"),
                         delayMin
                     )
-                    val nextPlt = nextStation.platform.trim().let { if (it.isBlank() || it == "0") "–" else it }
+                    val nextPlt = nextStation.platform.orEmpty().trim().let { if (it.isBlank() || it == "0") "–" else it }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(sLsc.nextStop, fontSize = 10.sp, color = AppMuted)
-                        Text(nextStation.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppNavy)
+                        Text(nextStation.name.orEmpty(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AppNavy)
                         Text(
                             buildString {
                                 append(nextEta)
@@ -1203,10 +1210,10 @@ private fun LiveStatusCard(
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(sLsc.nowAt, fontSize = 10.sp, color = Color.White.copy(0.6f))
-                        Text(currentStation.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(currentStation.name.orEmpty(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Text(
-                        "0/${currentStation.distance.ifBlank { "–" }} km",
+                        "0/${currentStation.distance.orEmpty().ifBlank { "–" }} km",
                         fontSize = 12.sp, color = Color.White.copy(0.7f)
                     )
                 }
@@ -1351,14 +1358,14 @@ private fun StationRow(
     // - Last station: its arrival     (it terminates here)
     // - Others: arrival at this stop
     val rawTime = when {
-        index == 0 -> station.departure
-        isLast     -> station.arrival
-        else       -> station.arrival
+        index == 0 -> station.departure.orEmpty()
+        isLast     -> station.arrival.orEmpty()
+        else       -> station.arrival.orEmpty()
     }
     val displayTime = rawTime.replace(".", ":").trim()
 
     // Day-offset suffix: show "+N" when day field > 1
-    val dayNum = station.day.trim().toIntOrNull() ?: 1
+    val dayNum = station.day.orEmpty().trim().toIntOrNull() ?: 1
     val daySuffix = if (dayNum > 1) "+${dayNum - 1}" else ""
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -1424,7 +1431,7 @@ private fun StationRow(
             // Left: name + meta
             Column(Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(
-                    station.name,
+                    station.name.orEmpty(),
                     fontSize   = if (isCurrent) 17.sp else 16.sp,
                     fontWeight = if (isCurrent || isLast || index == 0) FontWeight.Bold else FontWeight.Normal,
                     color      = nameColor,
@@ -1436,12 +1443,12 @@ private fun StationRow(
                     verticalAlignment     = Alignment.CenterVertically,
                     modifier              = Modifier.padding(top = 2.dp)
                 ) {
-                    Text(station.code, fontSize = 12.sp, color = metaColor, fontWeight = FontWeight.Medium)
+                    Text(station.code.orEmpty(), fontSize = 12.sp, color = metaColor, fontWeight = FontWeight.Medium)
                     if (station.halt > 0) {
                         Text("·", fontSize = 11.sp, color = metaColor)
                         Text("${station.halt}m halt", fontSize = 12.sp, color = metaColor)
                     }
-                    if (station.distance.isNotBlank() && station.distance != "0") {
+                    if (station.distance.orEmpty().isNotBlank() && station.distance != "0") {
                         Text("·", fontSize = 11.sp, color = metaColor)
                         Text("${station.distance} km", fontSize = 12.sp, color = metaColor)
                     }
@@ -1590,8 +1597,8 @@ private fun AlertPickerSheet(
     val options           = listOf(15, 30, 45, 60)
 
     // ETA label: prefer arrival time, fall back to departure
-    val etaDisplay = station.arrival
-        .ifBlank { station.departure }
+    val etaDisplay = station.arrival.orEmpty()
+        .ifBlank { station.departure.orEmpty() }
         .replace(".", ":")
         .trim()
         .ifBlank { "—" }
@@ -1620,7 +1627,7 @@ private fun AlertPickerSheet(
 
             Spacer(Modifier.height(12.dp))
             Text(sAp.arrivalAlert, fontSize = 22.sp, fontWeight = FontWeight.Black, color = AppNavy)
-            Text(station.name, fontSize = 14.sp, color = AppBody, textAlign = TextAlign.Center)
+            Text(station.name.orEmpty(), fontSize = 14.sp, color = AppBody, textAlign = TextAlign.Center)
 
             if (trainNumber.isNotBlank() || etaDisplay != "—") {
                 Text(
@@ -1737,7 +1744,7 @@ private fun StationMapSheet(station: Station, onDismiss: () -> Unit) {
 
             Text(sSm.platformNavigation, fontSize = 10.sp, letterSpacing = 1.5.sp, color = Color(0xFF005BA2), fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text(station.name, fontSize = 30.sp, fontWeight = FontWeight.Black, color = AppNavy)
+            Text(station.name.orEmpty(), fontSize = 30.sp, fontWeight = FontWeight.Black, color = AppNavy)
             Text("${info.platforms} platforms  ·  ${info.fobs} foot-over-bridges", fontSize = 13.sp, color = AppMuted)
 
             Spacer(Modifier.height(20.dp))
@@ -2014,7 +2021,7 @@ private fun LiveTrainRow(train: LiveTrainEntry, onTap: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    train.name.localTrainName(),
+                    train.name.orEmpty().localTrainName(),
                     fontSize   = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color      = Color(0xFF1565C0),
@@ -2034,7 +2041,7 @@ private fun LiveTrainRow(train: LiveTrainEntry, onTap: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier              = Modifier.padding(top = 2.dp)
             ) {
-                Text(train.number, fontSize = 11.sp, color = AppMuted)
+                Text(train.number.orEmpty(), fontSize = 11.sp, color = AppMuted)
                 if (train.platform != "–") {
                     Text("·", fontSize = 11.sp, color = AppMuted)
                     Text(

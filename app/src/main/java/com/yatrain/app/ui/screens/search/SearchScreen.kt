@@ -1,5 +1,6 @@
 package com.yatrain.app.ui.screens.search
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -24,6 +25,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -53,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yatrain.app.models.BetweenTrain
 import com.yatrain.app.models.Passenger
 import com.yatrain.app.models.PNRStatus
 import com.yatrain.app.models.Station
@@ -105,6 +109,16 @@ fun SearchScreen(
     val selectedStation       by viewModel.selectedStation.collectAsStateWithLifecycle()
     val stationTrains         by viewModel.stationTrains.collectAsStateWithLifecycle()
     val stationTrainsLoading  by viewModel.stationTrainsLoading.collectAsStateWithLifecycle()
+    val homeTab               by viewModel.homeTab.collectAsStateWithLifecycle()
+    val fromQuery             by viewModel.fromQuery.collectAsStateWithLifecycle()
+    val toQuery               by viewModel.toQuery.collectAsStateWithLifecycle()
+    val fromStation           by viewModel.fromStation.collectAsStateWithLifecycle()
+    val toStation             by viewModel.toStation.collectAsStateWithLifecycle()
+    val fromSuggestions       by viewModel.fromSuggestions.collectAsStateWithLifecycle()
+    val toSuggestions         by viewModel.toSuggestions.collectAsStateWithLifecycle()
+    val betweenResults        by viewModel.betweenResults.collectAsStateWithLifecycle()
+    val betweenLoading        by viewModel.betweenLoading.collectAsStateWithLifecycle()
+    val betweenError          by viewModel.betweenError.collectAsStateWithLifecycle()
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager       = LocalFocusManager.current
@@ -163,6 +177,24 @@ fun SearchScreen(
         return
     }
 
+    // ── Between-station results overlay ──────────────────────────────────────
+    if (betweenLoading || betweenResults.isNotEmpty() || betweenError != null) {
+        BetweenResultsView(
+            fromName      = fromStation?.name ?: fromQuery,
+            toName        = toStation?.name ?: toQuery,
+            trains        = betweenResults,
+            isLoading     = betweenLoading,
+            error         = betweenError,
+            onTrainTap    = { train ->
+                keyboardController?.hide(); focusManager.clearFocus()
+                viewModel.onBetweenTrainTapped(train)
+            },
+            onBack        = { viewModel.clearBetweenResults() }
+        )
+        if (showPaywall) ProPaywallSheet(viewModel = subViewModel, onDismiss = { showPaywall = false })
+        return
+    }
+
     // ── Default search layout ─────────────────────────────────────────────────
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -175,16 +207,57 @@ fun SearchScreen(
             }
 
             item {
-                SearchPill(
-                    query         = query,
-                    onQueryChange = { viewModel.onQueryChange(it) },
-                    onSearch      = { keyboardController?.hide(); focusManager.clearFocus(); viewModel.search() },
-                    modifier      = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)
+                TabbedSearchCard(
+                    homeTab             = homeTab,
+                    onTabChange         = { viewModel.setHomeTab(it) },
+                    fromQuery           = fromQuery,
+                    toQuery             = toQuery,
+                    fromStation         = fromStation,
+                    toStation           = toStation,
+                    onFromQueryChange   = { viewModel.onFromQueryChange(it) },
+                    onToQueryChange     = { viewModel.onToQueryChange(it) },
+                    onSwap              = { viewModel.swapStations() },
+                    onFindTrain         = {
+                        keyboardController?.hide(); focusManager.clearFocus()
+                        viewModel.searchBetween()
+                    },
+                    ticketsQuery        = query,
+                    onTicketsQueryChange = { viewModel.onQueryChange(it) },
+                    onTicketsSearch     = { keyboardController?.hide(); focusManager.clearFocus(); viewModel.search() },
+                    modifier            = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp)
                 )
             }
 
-            // Station name typeahead suggestions
-            if (stationSuggestions.isNotEmpty()) {
+            // TRAIN tab — From station suggestions
+            if (homeTab == HomeTab.TRAIN && fromSuggestions.isNotEmpty()) {
+                item {
+                    StationSuggestionsCard(
+                        suggestions = fromSuggestions,
+                        onSelect    = { station ->
+                            keyboardController?.hide(); focusManager.clearFocus()
+                            viewModel.onFromStationSelected(station)
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
+            // TRAIN tab — To station suggestions
+            if (homeTab == HomeTab.TRAIN && toSuggestions.isNotEmpty()) {
+                item {
+                    StationSuggestionsCard(
+                        suggestions = toSuggestions,
+                        onSelect    = { station ->
+                            keyboardController?.hide(); focusManager.clearFocus()
+                            viewModel.onToStationSelected(station)
+                        },
+                        modifier = Modifier.padding(horizontal = 18.dp).offset(y = (-6).dp)
+                    )
+                }
+            }
+
+            // TICKETS+ tab — station name typeahead
+            if (homeTab == HomeTab.TICKETS_PLUS && stationSuggestions.isNotEmpty()) {
                 item {
                     StationSuggestionsCard(
                         suggestions = stationSuggestions,
@@ -198,8 +271,8 @@ fun SearchScreen(
                 }
             }
 
-            // Train name suggestions (Rajdhani, Duronto, Shatabdi, etc.)
-            if (trainNameSuggestions.isNotEmpty()) {
+            // TICKETS+ tab — train name suggestions
+            if (homeTab == HomeTab.TICKETS_PLUS && trainNameSuggestions.isNotEmpty()) {
                 item {
                     TrainNameSuggestionsCard(
                         suggestions = trainNameSuggestions,
@@ -278,6 +351,12 @@ fun SearchScreen(
                         )
                     }
                 }
+                item {
+                    com.yatrain.app.ui.components.AdBannerCarousel(
+                        isPro    = isPro,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
                 item { QuickServicesSection() }
             } else if (selectedStation != null) {
                 item {
@@ -349,7 +428,12 @@ fun SearchScreen(
                         )
                     }
                 }
-                item { AffiliateBannersSection() }
+                item {
+                    com.yatrain.app.ui.components.AdBannerCarousel(
+                        isPro    = isPro,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
                 item { QuickServicesSection() }
             }
         }
@@ -418,6 +502,345 @@ fun SearchPill(
                 .padding(horizontal = 20.dp, vertical = 13.dp)
         ) {
             Text(LocalStrings.current.findTrain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tabbed search card  (Train  |  Ticket+)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun TabbedSearchCard(
+    homeTab: HomeTab,
+    onTabChange: (HomeTab) -> Unit,
+    fromQuery: String,
+    toQuery: String,
+    fromStation: StationInfo?,
+    toStation: StationInfo?,
+    onFromQueryChange: (String) -> Unit,
+    onToQueryChange: (String) -> Unit,
+    onSwap: () -> Unit,
+    onFindTrain: () -> Unit,
+    ticketsQuery: String,
+    onTicketsQueryChange: (String) -> Unit,
+    onTicketsSearch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val navGradient = Brush.linearGradient(colors = listOf(Color(0xFF173573), Color(0xFF13264D)))
+    val s = LocalStrings.current
+    Card(
+        modifier  = modifier,
+        shape     = RoundedCornerShape(20.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(10.dp)
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            // ── Tab row ──────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(Color(0xFFF1F3F6)),
+                horizontalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                listOf(HomeTab.TRAIN to s.tabTrain, HomeTab.TICKETS_PLUS to s.tabTicketPlus).forEach { (tab, label) ->
+                    val selected = homeTab == tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(if (selected) navGradient else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent)))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onTabChange(tab) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                imageVector = if (tab == HomeTab.TRAIN) Icons.Outlined.DirectionsRailway else Icons.Outlined.ConfirmationNumber,
+                                contentDescription = null,
+                                tint = if (selected) Color.White else AppNavy,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (selected) Color.White else AppNavy)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (homeTab == HomeTab.TRAIN) {
+                // ── TRAIN tab: From / swap / To / Find ───────────────────────
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StationInputField(
+                        query     = fromQuery,
+                        label     = s.fromLabel,
+                        hint      = s.stationCodeHint,
+                        onChange  = onFromQueryChange,
+                        modifier  = Modifier.weight(1f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(AppNavy)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null, onClick = onSwap
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Outlined.SwapHoriz, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    StationInputField(
+                        query     = toQuery,
+                        label     = s.toLabel,
+                        hint      = s.stationCodeHint,
+                        onChange  = onToQueryChange,
+                        modifier  = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    val canFind = fromStation != null && toStation != null
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(52.dp)
+                            .width(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (canFind) navGradient else Brush.linearGradient(listOf(AppNavy.copy(0.4f), AppNavy.copy(0.4f))))
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null, enabled = canFind, onClick = onFindTrain
+                            )
+                    ) {
+                        Text(s.findButton, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                // ── TICKETS+ tab: single query field ─────────────────────────
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF1F3F6))
+                        .padding(horizontal = 14.dp, vertical = 4.dp)
+                ) {
+                    BasicTextField(
+                        value           = ticketsQuery,
+                        onValueChange   = onTicketsQueryChange,
+                        singleLine      = true,
+                        textStyle       = TextStyle(fontSize = 14.sp, color = Color(0xFF1F2937)),
+                        cursorBrush     = SolidColor(AppNavy),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { onTicketsSearch() }),
+                        modifier        = Modifier.weight(1f).padding(vertical = 13.dp),
+                        decorationBox   = { inner ->
+                            Box {
+                                if (ticketsQuery.isEmpty()) Text(LocalStrings.current.searchHint, fontSize = 14.sp, color = Color(0xFF9CA3AF), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                inner()
+                            }
+                        }
+                    )
+                    if (ticketsQuery.isNotEmpty()) {
+                        IconButton(onClick = { onTicketsQueryChange("") }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Clear, null, tint = Color(0xFFD1D5DB), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StationInputField(
+    query: String,
+    label: String,
+    hint: String,
+    onChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor = if (query.isNotEmpty()) AppNavy.copy(alpha = 0.5f) else Color(0xFFE5E7EB)
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .background(Color.White)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(Icons.Outlined.LocationOn, null, tint = AppNavy, modifier = Modifier.size(12.dp))
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AppNavy, letterSpacing = 0.5.sp)
+        }
+        BasicTextField(
+            value           = query,
+            onValueChange   = onChange,
+            singleLine      = true,
+            textStyle       = TextStyle(fontSize = 13.sp, color = Color(0xFF1F2937)),
+            cursorBrush     = SolidColor(AppNavy),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            modifier        = Modifier.fillMaxWidth(),
+            decorationBox   = { inner ->
+                Box {
+                    if (query.isEmpty()) Text(hint, fontSize = 12.sp, color = Color(0xFF9CA3AF))
+                    inner()
+                }
+            }
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Between-station results view
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun BetweenResultsView(
+    fromName: String,
+    toName: String,
+    trains: List<BetweenTrain>,
+    isLoading: Boolean,
+    error: String?,
+    onTrainTap: (BetweenTrain) -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(AppBackground)
+    ) {
+        // Header
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(horizontal = 8.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, null, tint = AppNavy)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text       = "${fromName.uppercase()} → ${toName.uppercase()}",
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = AppNavy,
+                    maxLines   = 1,
+                    overflow   = TextOverflow.Ellipsis
+                )
+                if (!isLoading && trains.isNotEmpty()) {
+                    Text("${trains.size} ${LocalStrings.current.trainsFound}", fontSize = 12.sp, color = AppMuted)
+                }
+            }
+        }
+
+        HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
+
+        when {
+            isLoading && trains.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AppOrange, modifier = Modifier.size(36.dp))
+                }
+            }
+            error != null && trains.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⚠", fontSize = 32.sp)
+                        Text(error, fontSize = 14.sp, color = AppTitle, textAlign = TextAlign.Center,
+                             modifier = Modifier.padding(horizontal = 32.dp))
+                    }
+                }
+            }
+            else -> {
+                LazyColumn(
+                    contentPadding        = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement   = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(trains) { train ->
+                        BetweenTrainCard(train = train, onTap = { onTrainTap(train) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BetweenTrainCard(train: BetweenTrain, onTap: () -> Unit) {
+    Card(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = AppCard),
+        border    = BorderStroke(1.dp, AppBorder),
+        elevation = CardDefaults.cardElevation(2.dp),
+        onClick   = onTap
+    ) {
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Row 1: Train number + time badge
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text       = train.number,
+                        fontSize   = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color      = AppNavy
+                    )
+                    if (train.departureTime.isNotBlank() || train.arrivalTime.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFF1F3F6))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text     = "${train.departureTime.ifBlank { "?" }} → ${train.arrivalTime.ifBlank { "?" }}",
+                                fontSize = 11.sp,
+                                color    = AppMuted,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                // Row 2: Train name · From → To
+                Text(
+                    text     = "${train.name.localTrainName()} · ${train.source.ifBlank { train.sourceCode }} → ${train.destination.ifBlank { train.destinationCode }}",
+                    fontSize = 12.sp,
+                    color    = AppMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                // Row 3: Running day chips (active days only)
+                if (train.runsOn.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        train.runsOn.forEach { day ->
+                            Box(
+                                modifier         = Modifier
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(AppNavy)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(day, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Icon(Icons.Outlined.ChevronRight, null, tint = AppOrange, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -1747,15 +2170,15 @@ fun PNRStatusCard(
                 Spacer(Modifier.height(14.dp))
 
                 // Train name + meta
-                Text(pnr.trainName.localTrainName(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                Text(pnr.trainName.orEmpty().localTrainName(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(
                     verticalAlignment     = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier              = Modifier.padding(top = 2.dp)
                 ) {
-                    Text(pnr.trainNumber, fontSize = 12.sp, color = Color.White.copy(0.55f))
-                    if (pnr.journeyClass.isNotBlank()) {
+                    Text(pnr.trainNumber.orEmpty(), fontSize = 12.sp, color = Color.White.copy(0.55f))
+                    if (pnr.journeyClass.orEmpty().isNotBlank()) {
                         Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(0.30f)))
                         Box(
                             modifier = Modifier.clip(RoundedCornerShape(4.dp))
@@ -2030,11 +2453,11 @@ fun TrainResultCard(train: Train, onTap: () -> Unit = {}) {
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(train.name.localTrainName(), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1565C0), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (train.source.isNotEmpty() && train.destination.isNotEmpty()) {
+                Text(train.name.orEmpty().localTrainName(), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFF1565C0), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (train.source.orEmpty().isNotEmpty() && train.destination.orEmpty().isNotEmpty()) {
                     Text("${train.source} → ${train.destination}", fontSize = 12.sp, color = Zinc500)
                 }
-                Text(train.number, fontSize = 12.sp, color = AppMuted, fontWeight = FontWeight.Medium)
+                Text(train.number.orEmpty(), fontSize = 12.sp, color = AppMuted, fontWeight = FontWeight.Medium)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(LocalStrings.current.routeLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = AppOrange)
@@ -2063,7 +2486,13 @@ private fun RouteDetailView(
     onSave:       () -> Unit,
     onUpgrade:    () -> Unit
 ) {
+    val listState = rememberLazyListState()
+    val scope     = rememberCoroutineScope()
+    val showGoTop by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
+        state          = listState,
         modifier       = Modifier.fillMaxSize().background(AppBackground),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
@@ -2077,8 +2506,8 @@ private fun RouteDetailView(
                 }
                 Spacer(Modifier.width(4.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(train.name.localTrainName(), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${train.number}  ·  ${train.source.ifBlank { "–" }} → ${train.destination.ifBlank { "–" }}", fontSize = 12.sp, color = AppMuted)
+                    Text(train.name.orEmpty().localTrainName(), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AppNavy, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${train.number.orEmpty()}  ·  ${train.source.orEmpty().ifBlank { "–" }} → ${train.destination.orEmpty().ifBlank { "–" }}", fontSize = 12.sp, color = AppMuted)
                 }
             }
             HorizontalDivider(color = AppBorder, thickness = 0.5.dp)
@@ -2159,6 +2588,29 @@ private fun RouteDetailView(
             )
         }
     }
+
+    AnimatedVisibility(
+        visible  = showGoTop,
+        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .shadow(8.dp, CircleShape)
+                .clip(CircleShape)
+                .background(Color.White)
+                .clickable { scope.launch { listState.animateScrollToItem(0) } },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector        = Icons.Outlined.KeyboardArrowUp,
+                contentDescription = "Go to top",
+                tint               = AppNavy,
+                modifier           = Modifier.size(24.dp)
+            )
+        }
+    }
+    } // end Box
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2192,9 +2644,9 @@ private fun SearchStationRow(
         animationSpec = tween(250), label = "alertColor"
     )
 
-    val rawTime     = if (index == 0) station.departure else station.arrival
+    val rawTime     = if (index == 0) station.departure.orEmpty() else station.arrival.orEmpty()
     val displayTime = rawTime.replace(".", ":").trim()
-    val dayNum      = station.day.trim().toIntOrNull() ?: 1
+    val dayNum      = station.day.orEmpty().trim().toIntOrNull() ?: 1
     val daySuffix   = if (dayNum > 1) "+${dayNum - 1}" else ""
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -2223,15 +2675,15 @@ private fun SearchStationRow(
         ) {
             Column(Modifier.weight(1f).padding(end = 8.dp)) {
                 Text(
-                    station.name,
+                    station.name.orEmpty(),
                     fontSize   = if (isCurrent) 17.sp else 16.sp,
                     fontWeight = if (isCurrent || isLast || index == 0) FontWeight.Bold else FontWeight.Normal,
                     color      = nameColor, maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    Text(station.code, fontSize = 12.sp, color = metaColor, fontWeight = FontWeight.Medium)
+                    Text(station.code.orEmpty(), fontSize = 12.sp, color = metaColor, fontWeight = FontWeight.Medium)
                     if (station.halt > 0) { Text("·", fontSize = 11.sp, color = metaColor); Text("${station.halt}m halt", fontSize = 12.sp, color = metaColor) }
-                    if (station.distance.isNotBlank() && station.distance != "0") { Text("·", fontSize = 11.sp, color = metaColor); Text("${station.distance} km", fontSize = 12.sp, color = metaColor) }
+                    if (station.distance.orEmpty().isNotBlank() && station.distance != "0") { Text("·", fontSize = 11.sp, color = metaColor); Text("${station.distance} km", fontSize = 12.sp, color = metaColor) }
                 }
                 if (isCurrent) {
                     val sCurr = LocalStrings.current
@@ -2295,8 +2747,8 @@ private fun AlertPickerSheet(
     var selectedMin by remember { mutableIntStateOf(15) }
     val options     = listOf(15, 30, 45, 60)
 
-    val etaDisplay = station.arrival
-        .ifBlank { station.departure }
+    val etaDisplay = station.arrival.orEmpty()
+        .ifBlank { station.departure.orEmpty() }
         .replace(".", ":")
         .trim()
         .ifBlank { "–" }
@@ -2325,7 +2777,7 @@ private fun AlertPickerSheet(
 
             Spacer(Modifier.height(12.dp))
             Text(sAp.arrivalAlert, fontSize = 22.sp, fontWeight = FontWeight.Black, color = AppNavy)
-            Text(station.name, fontSize = 14.sp, color = AppBody, textAlign = TextAlign.Center)
+            Text(station.name.orEmpty(), fontSize = 14.sp, color = AppBody, textAlign = TextAlign.Center)
 
             if (trainNumber.isNotBlank() || etaDisplay != "–") {
                 Text(
@@ -2424,19 +2876,20 @@ private fun PNRBasicCard(
                 verticalAlignment     = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(pnr.trainName.ifBlank { pnr.trainNumber }.localTrainName(), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTitle)
+                    Text(pnr.trainName.orEmpty().ifBlank { pnr.trainNumber.orEmpty() }.localTrainName(), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AppTitle)
                     Text("${s.pnrLabel} ${pnr.pnrNumber}", fontSize = 11.sp, color = AppMuted)
                 }
+                val currentStatus = pnr.currentStatus.orEmpty()
                 val statusColor = when {
-                    pnr.currentStatus.startsWith("CNF", true) -> Color(0xFF22C55E)
-                    pnr.currentStatus.startsWith("WL",  true) -> Color(0xFFEF4444)
-                    pnr.currentStatus.startsWith("RAC", true) -> Color(0xFFF59E0B)
+                    currentStatus.startsWith("CNF", true) -> Color(0xFF22C55E)
+                    currentStatus.startsWith("WL",  true) -> Color(0xFFEF4444)
+                    currentStatus.startsWith("RAC", true) -> Color(0xFFF59E0B)
                     else -> AppMuted
                 }
                 Box(
                     Modifier.clip(RoundedCornerShape(8.dp)).background(statusColor.copy(0.12f)).padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
-                    Text(pnr.currentStatus.ifBlank { pnr.bookingStatus }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = statusColor)
+                    Text(currentStatus.ifBlank { pnr.bookingStatus.orEmpty() }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = statusColor)
                 }
             }
 
@@ -2445,19 +2898,19 @@ private fun PNRBasicCard(
             // From → To
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(pnr.from, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppNavy)
+                    Text(pnr.from.orEmpty(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppNavy)
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     androidx.compose.material3.HorizontalDivider(color = AppBorder, thickness = 1.dp)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(pnr.to, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppNavy)
+                    Text(pnr.to.orEmpty(), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppNavy)
                 }
             }
 
-            if (pnr.dateOfJourney.isNotBlank()) {
+            if (pnr.dateOfJourney.orEmpty().isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
-                Text(pnr.dateOfJourney, fontSize = 11.sp, color = AppMuted)
+                Text(pnr.dateOfJourney.orEmpty(), fontSize = 11.sp, color = AppMuted)
             }
 
             Spacer(Modifier.height(14.dp))

@@ -101,7 +101,7 @@ suspend fun List<Station>.withTranslatedNames(): List<Station> {
     if (MlKitTranslator.isEnglish) return this
     return try {
         coroutineScope {
-            map { s -> async { s.copy(name = MlKitTranslator.translate(s.name)) } }.awaitAll()
+            map { s -> async { s.copy(name = MlKitTranslator.translate(s.name.orEmpty())) } }.awaitAll()
         }
     } catch (e: CancellationException) {
         throw e
@@ -140,9 +140,9 @@ suspend fun List<Train>.withTranslatedNames(): List<Train> {
             map { t ->
                 async {
                     t.copy(
-                        name        = MlKitTranslator.translate(t.name),
-                        source      = MlKitTranslator.translate(t.source),
-                        destination = MlKitTranslator.translate(t.destination)
+                        name        = MlKitTranslator.translate(t.name.orEmpty()),
+                        source      = MlKitTranslator.translate(t.source.orEmpty()),
+                        destination = MlKitTranslator.translate(t.destination.orEmpty())
                     )
                 }
             }.awaitAll()
@@ -154,15 +154,48 @@ suspend fun List<Train>.withTranslatedNames(): List<Train> {
     }
 }
 
+fun PNRStatus.sanitized(): PNRStatus = copy(
+    pnrNumber        = pnrNumber.orEmpty(),
+    trainNumber      = trainNumber.orEmpty(),
+    trainName        = trainName.orEmpty(),
+    from             = from.orEmpty(),
+    to               = to.orEmpty(),
+    boardingPoint    = boardingPoint.orEmpty(),
+    reservationUpto  = reservationUpto.orEmpty(),
+    bookingStatus    = bookingStatus.orEmpty(),
+    currentStatus    = currentStatus.orEmpty(),
+    coach            = coach.orEmpty(),
+    berth            = berth.orEmpty(),
+    dateOfJourney    = dateOfJourney.orEmpty(),
+    journeyClass     = journeyClass.orEmpty(),
+    chartStatus      = chartStatus.orEmpty(),
+    quota            = quota.orEmpty(),
+    arrivalDate      = arrivalDate.orEmpty(),
+    isWL             = isWL.orEmpty(),
+    passengers       = (passengers ?: emptyList()).map { p ->
+        p.copy(
+            bookingStatus        = p.bookingStatus.orEmpty(),
+            currentStatus        = p.currentStatus.orEmpty(),
+            bookingCoachId       = p.bookingCoachId.orEmpty(),
+            bookingBerthCode     = p.bookingBerthCode.orEmpty(),
+            bookingStatusDetails = p.bookingStatusDetails.orEmpty(),
+            currentCoachId       = p.currentCoachId.orEmpty(),
+            currentBerthCode     = p.currentBerthCode.orEmpty(),
+            currentStatusDetails = p.currentStatusDetails.orEmpty(),
+            passengerQuota       = p.passengerQuota.orEmpty()
+        )
+    }
+)
+
 suspend fun PNRStatus.withTranslatedNames(): PNRStatus {
     if (MlKitTranslator.isEnglish) return this
     return try {
         copy(
-            trainName       = MlKitTranslator.translate(trainName),
-            from            = MlKitTranslator.translate(from),
-            to              = MlKitTranslator.translate(to),
-            boardingPoint   = MlKitTranslator.translate(boardingPoint),
-            reservationUpto = MlKitTranslator.translate(reservationUpto)
+            trainName       = MlKitTranslator.translate(trainName.orEmpty()),
+            from            = MlKitTranslator.translate(from.orEmpty()),
+            to              = MlKitTranslator.translate(to.orEmpty()),
+            boardingPoint   = MlKitTranslator.translate(boardingPoint.orEmpty()),
+            reservationUpto = MlKitTranslator.translate(reservationUpto.orEmpty())
         )
     } catch (e: CancellationException) {
         throw e

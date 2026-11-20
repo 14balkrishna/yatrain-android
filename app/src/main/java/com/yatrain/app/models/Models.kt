@@ -18,9 +18,9 @@ data class YatrainUser(
 
 data class Train(
     @SerializedName(value = "train_no",    alternate = ["trainNo", "number", "train_number"])
-    val number: String,
+    val number: String = "",
     @SerializedName(value = "train_name",  alternate = ["trainName", "name"])
-    val name: String,
+    val name: String = "",
     @SerializedName(value = "from_stn_name", alternate = ["source", "fromStnName", "from_station_name", "from"])
     val source: String = "",
     @SerializedName(value = "from_stn_code", alternate = ["sourceCode", "fromStnCode", "from_station_code"])
@@ -48,9 +48,9 @@ data class Train(
 
 data class Station(
     @SerializedName(value = "station_code", alternate = ["stationCode", "code", "stnCode"])
-    val code: String,
+    val code: String = "",
     @SerializedName(value = "station_name", alternate = ["stationName", "name", "stnName"])
-    val name: String,
+    val name: String = "",
     @SerializedName(value = "arrival",      alternate = ["arrivalTime", "arr_time", "arrTime", "scheduled_arrival"])
     val arrival: String = "",
     @SerializedName(value = "departure",    alternate = ["departureTime", "dep_time", "depTime", "scheduled_departure"])
@@ -68,9 +68,9 @@ data class Station(
 
 data class TrainSchedule(
     @SerializedName(value = "train_no",        alternate = ["trainNo"])
-    val trainNo: String,
+    val trainNo: String = "",
     @SerializedName(value = "train_name",      alternate = ["trainName"])
-    val trainName: String,
+    val trainName: String = "",
     @SerializedName(value = "from_stn_code",   alternate = ["fromCode"])
     val fromCode: String = "",
     @SerializedName(value = "to_stn_code",     alternate = ["toCode"])
@@ -84,8 +84,8 @@ data class TrainSchedule(
 // ── LiveStatus ────────────────────────────────────────────────────────────────
 
 data class LiveStatus(
-    @SerializedName("train_number")          val trainNumber: String,
-    @SerializedName("train_name")            val trainName: String,
+    @SerializedName("train_number")          val trainNumber: String = "",
+    @SerializedName("train_name")            val trainName: String = "",
     @SerializedName("current_station_code")  val currentStationCode: String = "",
     @SerializedName("current_station_name")  val currentStationName: String = "",
     val delay: Int = 0,
@@ -97,20 +97,19 @@ data class LiveStatus(
 // ── PNR ───────────────────────────────────────────────────────────────────────
 
 data class PNRStatus(
-    @SerializedName("pnr_number", alternate = ["PnrNumber", "pnrNumber"])
+    @SerializedName("pnr_number", alternate = ["pnrNumber", "PnrNumber", "Pnr", "pnr", "PNR", "pnrNo", "PnrNo"])
     val pnrNumber: String = "",
-    @SerializedName("train_number", alternate = ["TrainNo", "trainNo", "trainNumber"])
+    @SerializedName("train_number", alternate = ["trainNumber", "TrainNo", "trainNo", "train_no"])
     val trainNumber: String = "",
-    @SerializedName("train_name", alternate = ["TrainName", "trainName"])
+    @SerializedName("train_name", alternate = ["trainName", "TrainName", "train_name"])
     val trainName: String = "",
-    // API returns sourceStation / destinationStation
-    @SerializedName("from", alternate = ["From", "from_station", "sourceStation"])
+    @SerializedName("from", alternate = ["From", "from_station", "sourceStation", "source_station", "boarding_station_name", "boardingStationName"])
     val from: String = "",
-    @SerializedName("to", alternate = ["To", "to_station", "destinationStation"])
+    @SerializedName("to", alternate = ["To", "to_station", "destinationStation", "destination_station", "reservation_upto_station_name", "reservationUptoStationName"])
     val to: String = "",
-    @SerializedName("boarding_point", alternate = ["BoardingPoint", "boardingPoint"])
+    @SerializedName("boarding_point", alternate = ["BoardingPoint", "boardingPoint", "boarding_station", "boardingStation"])
     val boardingPoint: String = "",
-    @SerializedName("reservation_upto", alternate = ["reservationUpto"])
+    @SerializedName("reservation_upto", alternate = ["reservationUpto", "reservation_upto_station", "reservationUptoStation"])
     val reservationUpto: String = "",
     @SerializedName("booking_status", alternate = ["BookingStatus"])
     val bookingStatus: String = "",
@@ -120,8 +119,7 @@ data class PNRStatus(
     val coach: String = "",
     @SerializedName("berth", alternate = ["Berth"])
     val berth: String = "",
-    // API returns passengerList
-    @SerializedName("passengers", alternate = ["Passengers", "passengerList"])
+    @SerializedName("passengers", alternate = ["Passengers", "passengerList", "passenger", "Passenger", "passenger_list"])
     val passengers: List<Passenger> = emptyList(),
     // Journey metadata
     @SerializedName("date_of_journey", alternate = ["dateOfJourney"])
@@ -221,9 +219,9 @@ data class SavedStationAlert(
 
 data class StationSearchResult(
     @SerializedName(value = "station_code", alternate = ["code", "stationCode"])
-    val code: String,
+    val code: String = "",
     @SerializedName(value = "station_name", alternate = ["name", "stationName"])
-    val name: String
+    val name: String = ""
 )
 
 // ── Station Trains (GET /station/{code}/trains) ────────────────────────────────
@@ -250,6 +248,22 @@ data class StationTrain(
     val originatesHere: Boolean = false,
     @SerializedName(value = "terminates_here", alternate = ["terminatesHere"])
     val terminatesHere: Boolean = false
+)
+
+// ── Between-station train (GET /between/{fromCode}/{toCode}) ──────────────────
+// Running days parsed server-side from 3 possible formats — stored as short labels.
+
+data class BetweenTrain(
+    val number: String = "",
+    val name: String = "",
+    val source: String = "",
+    val sourceCode: String = "",
+    val destination: String = "",
+    val destinationCode: String = "",
+    val departureTime: String = "",   // HH:mm, normalised from dot/colon separator
+    val arrivalTime: String = "",     // HH:mm
+    val duration: String = "",
+    val runsOn: List<String> = emptyList()  // e.g. ["M","W","F"]  — active days only
 )
 
 // ── API Response wrapper ──────────────────────────────────────────────────────

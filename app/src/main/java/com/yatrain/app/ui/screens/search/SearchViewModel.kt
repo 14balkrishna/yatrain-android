@@ -15,6 +15,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.yatrain.app.YatrainApplication
 import io.github.jan.supabase.gotrue.auth
+import com.yatrain.app.models.BetweenTrain
 import com.yatrain.app.models.PNRStatus
 import com.yatrain.app.models.SavedStationAlert
 import com.yatrain.app.models.SavedTicket
@@ -30,6 +31,7 @@ import com.yatrain.app.ui.screens.track.TrainRef
 import com.yatrain.app.ui.screens.track.allStationsForSearch
 import com.yatrain.app.ui.screens.track.searchTrainsByName
 import com.yatrain.app.i18n.MlKitTranslator
+import com.yatrain.app.i18n.sanitized
 import com.yatrain.app.i18n.withTranslatedNames
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,6 +40,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+
+enum class HomeTab { TRAIN, TICKETS_PLUS }
 
 // ── Curated popular trains (mirrors iOS list) ─────────────────────────────────
 
@@ -159,8 +163,59 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private var searchJob: Job? = null
 
+    // ── Home tab (TRAIN = From/To search, TICKETS_PLUS = PNR/number lookup) ───────
+
+    private val _homeTab = MutableStateFlow(HomeTab.TRAIN)
+    val homeTab: StateFlow<HomeTab> = _homeTab.asStateFlow()
+
+    // ── Between-station search state (TRAIN tab) ──────────────────────────────
+
+    private val _fromQuery = MutableStateFlow("")
+    val fromQuery: StateFlow<String> = _fromQuery.asStateFlow()
+
+    private val _toQuery = MutableStateFlow("")
+    val toQuery: StateFlow<String> = _toQuery.asStateFlow()
+
+    private val _fromStation = MutableStateFlow<StationInfo?>(null)
+    val fromStation: StateFlow<StationInfo?> = _fromStation.asStateFlow()
+
+    private val _toStation = MutableStateFlow<StationInfo?>(null)
+    val toStation: StateFlow<StationInfo?> = _toStation.asStateFlow()
+
+    private val _fromSuggestions = MutableStateFlow<List<StationInfo>>(emptyList())
+    val fromSuggestions: StateFlow<List<StationInfo>> = _fromSuggestions.asStateFlow()
+
+    private val _toSuggestions = MutableStateFlow<List<StationInfo>>(emptyList())
+    val toSuggestions: StateFlow<List<StationInfo>> = _toSuggestions.asStateFlow()
+
+    private val _betweenResults = MutableStateFlow<List<BetweenTrain>>(emptyList())
+    val betweenResults: StateFlow<List<BetweenTrain>> = _betweenResults.asStateFlow()
+
+    private val _betweenLoading = MutableStateFlow(false)
+    val betweenLoading: StateFlow<Boolean> = _betweenLoading.asStateFlow()
+
+    private val _betweenError = MutableStateFlow<String?>(null)
+    val betweenError: StateFlow<String?> = _betweenError.asStateFlow()
+
+    private var fromSearchJob: Job? = null
+    private var toSearchJob: Job? = null
+
     private fun isPNR(q: String)         = q.length == 10 && q.all { it.isDigit() }
     private fun isTrainNumber(q: String) = q.length in 4..5 && q.all { it.isDigit() }
+
+    private fun Throwable?.toUserMessage(fallback: String = "Something went wrong. Please try again."): String {
+        if (this == null) return fallback
+        val msg = message ?: ""
+        return when {
+            this is java.net.UnknownHostException ||
+            msg.contains("Unable to resolve host", ignoreCase = true) -> "No internet connection. Check your network and try again."
+            this is java.net.SocketTimeoutException ||
+            msg.contains("timeout", ignoreCase = true)                -> "Connection timed out. Please try again."
+            this is java.io.IOException                               -> "Network error. Please check your connection."
+            msg.isNotBlank()                                          -> msg
+            else                                                      -> fallback
+        }
+    }
 
     // Popular trains use the static curated list only — no auto-refresh on load
 
@@ -216,7 +271,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
                                 val local = allStationsForSearch.firstOrNull {
                                     it.code.equals(r.code, ignoreCase = true)
                                 }
-                                StationInfo(r.code, r.name, local?.city ?: "", local?.lat ?: 0.0, local?.lng ?: 0.0)
+                                StationInfo(r.code.orEmpty(), r.name.orEmpty(), local?.city ?: "", local?.lat ?: 0.0, local?.lng ?: 0.0)
                             }.take(5)
                         }
                     }
@@ -240,9 +295,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         if (trimmed.length >= 4) {
             searchJob?.cancel()
             searchJob = viewModelScope.launch {
-                _isLoading.value = true; _error.value = null
-                doSearch(trimmed)
-                _isLoading.value = false
+                try {
+                    _isLoading.value = true; _error.value = null
+                    doSearch(trimmed)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    _error.value = "Something went wrong. Please try again."
+                } finally {
+                    _isLoading.value = false
+                }
             }
         }
     }
@@ -252,25 +314,27 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             isPNR(trimmed) -> {
                 _results.value = emptyList()
                 _isTicketSaved.value = false
-                val pnrR = api.getPNRStatus(trimmed)
-                val pnr  = pnrR.getOrNull()
+                val pnrR = withTimeoutOrNull(30_000L) { api.getPNRStatus(trimmed) }
+                    ?: run { _error.value = "Connection timed out. Please try again."; return }
+                val pnr = pnrR.getOrNull()
                 if (pnr != null) {
-                    _pnrResult.value = pnr.withTranslatedNames()
+                    _pnrResult.value = pnr.sanitized().withTranslatedNames()
                     _isTicketSaved.value = repo.isTicketSaved(userId(), pnr.pnrNumber)
                 } else {
-                    _error.value = "PNR not found — check the number and try again."
+                    _error.value = pnrR.exceptionOrNull().toUserMessage("PNR not found — check the number and try again.")
                 }
             }
             isTrainNumber(trimmed) -> {
                 _pnrResult.value = null
-                val trainR = api.searchTrains(trimmed)
+                val trainR = withTimeoutOrNull(30_000L) { api.searchTrains(trimmed) }
+                    ?: run { _error.value = "Connection timed out. Please try again."; return }
                 val trains = trainR.getOrNull()
                 if (trains != null) {
                     val translated = trains.withTranslatedNames()
                     _results.value = translated
                     translated.firstOrNull()?.let { loadScheduleFor(it) }
                 } else {
-                    _error.value = "Train \"$trimmed\" not found."
+                    _error.value = trainR.exceptionOrNull().toUserMessage("Train \"$trimmed\" not found.")
                 }
             }
             else -> {
@@ -299,9 +363,11 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun fetchCoachPnr(pnr: String) {
         _coachPnrLoading.value = true
-        api.getPNRStatus(pnr)
-            .onSuccess { _coachPnrResult.value = it }
-            .onFailure { _coachPnrResult.value = null }
+        withTimeoutOrNull(30_000L) {
+            api.getPNRStatus(pnr)
+                .onSuccess { _coachPnrResult.value = it.sanitized() }
+                .onFailure { _coachPnrResult.value = null }
+        } ?: run { _coachPnrResult.value = null }
         _coachPnrLoading.value = false
     }
 
@@ -319,32 +385,39 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _stationTrainsLoading.value = true
-            withTimeoutOrNull(15_000L) {
-                val r = api.getStationTrains(station.code)
-                val trains = r.getOrNull()
-                if (trains != null) {
-                    val mapped = trains.map { t ->
-                        val dep = t.departure.replace(".", ":").ifBlank { "Last" }
-                        val arr = t.arrival.replace(".", ":").ifBlank { "First" }
-                        LiveTrainEntry(
-                            number    = t.number,
-                            name      = t.name,
-                            fromCode  = "",
-                            fromName  = t.source,
-                            toCode    = "",
-                            toName    = t.destination,
-                            arrival   = arr,
-                            departure = dep,
-                            platform  = t.platform.ifBlank { "–" },
-                            delayMin  = t.delayMinutes
-                        )
+            try {
+                withTimeoutOrNull(50_000L) {
+                    val r = api.getTrainsAtStation(station.code)
+                    val trains = r.getOrNull()
+                    if (trains != null) {
+                        val mapped = trains.map { t ->
+                            val dep = t.departure.orEmpty().replace(".", ":").ifBlank { "Last" }
+                            val arr = t.arrival.orEmpty().replace(".", ":").ifBlank { "First" }
+                            LiveTrainEntry(
+                                number    = t.number.orEmpty(),
+                                name      = t.name.orEmpty(),
+                                fromCode  = "",
+                                fromName  = t.source.orEmpty(),
+                                toCode    = "",
+                                toName    = t.destination.orEmpty(),
+                                arrival   = arr,
+                                departure = dep,
+                                platform  = t.platform.orEmpty().ifBlank { "–" },
+                                delayMin  = t.delayMinutes
+                            )
+                        }
+                        _stationTrains.value = mapped.withTranslatedNames()
+                    } else {
+                        _error.value = r.exceptionOrNull().toUserMessage("Could not load trains for ${station.name}.")
                     }
-                    _stationTrains.value = mapped.withTranslatedNames()
-                } else {
-                    _error.value = r.exceptionOrNull()?.message ?: "Could not load trains for ${station.name}."
-                }
+                } ?: run { _error.value = "Connection timed out. Please try again." }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _error.value = "Could not load trains for ${station.name}."
+            } finally {
+                _stationTrainsLoading.value = false
             }
-            _stationTrainsLoading.value = false
         }
     }
 
@@ -358,9 +431,16 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         _pnrResult.value = null
         _error.value = null
         searchJob = viewModelScope.launch {
-            _isLoading.value = true
-            doSearch(train.number)
-            _isLoading.value = false
+            try {
+                _isLoading.value = true
+                doSearch(train.number)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _error.value = "Something went wrong. Please try again."
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -400,17 +480,26 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadScheduleFor(train: Train) {
         _scheduleLoading.value = true
-        val r  = api.getSchedule(train.number)
-        val ts = r.getOrNull()
-        if (ts != null) {
-            val translated = ts.route.withTranslatedNames()
-            _schedule.value        = translated
-            _currentStopIndex.value = computeCurrentStop(translated)
-            _selectedTrain.value   = train
-        } else {
+        try {
+            withTimeoutOrNull(30_000L) {
+                val r  = api.getSchedule(train.number)
+                val ts = r.getOrNull()
+                if (ts != null) {
+                    val translated = (ts.route ?: emptyList()).withTranslatedNames()
+                    _schedule.value         = translated
+                    _currentStopIndex.value = computeCurrentStop(translated)
+                    _selectedTrain.value    = train
+                } else {
+                    _schedule.value = emptyList()
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
             _schedule.value = emptyList()
+        } finally {
+            _scheduleLoading.value = false
         }
-        _scheduleLoading.value = false
     }
 
     fun clearSelection() {
@@ -588,5 +677,114 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
             val parts = timeStr.replace(".", ":").split(":")
             parts[0].trim().toInt() * 60 + parts[1].trim().toInt()
         } catch (_: Exception) { Int.MAX_VALUE }
+    }
+
+    // ── Home tab & between-station functions ──────────────────────────────────
+
+    fun setHomeTab(tab: HomeTab) { _homeTab.value = tab }
+
+    fun onFromQueryChange(q: String) {
+        _fromQuery.value = q
+        _fromStation.value = null
+        if (q.length < 2) { _fromSuggestions.value = emptyList(); return }
+        val lq = q.lowercase()
+        _fromSuggestions.value = allStationsForSearch.filter { s ->
+            s.name.lowercase().contains(lq) || s.city.lowercase().contains(lq) || s.code.lowercase().startsWith(lq)
+        }.take(5)
+        fromSearchJob?.cancel()
+        fromSearchJob = viewModelScope.launch {
+            delay(300)
+            api.autocompleteStation(q).onSuccess { list ->
+                if (list.isNotEmpty()) _fromSuggestions.value = list.map { r ->
+                    val local = allStationsForSearch.firstOrNull { it.code.equals(r.code, ignoreCase = true) }
+                    StationInfo(r.code.orEmpty(), r.name.orEmpty(), local?.city ?: "", local?.lat ?: 0.0, local?.lng ?: 0.0)
+                }.take(5)
+            }
+        }
+    }
+
+    fun onToQueryChange(q: String) {
+        _toQuery.value = q
+        _toStation.value = null
+        if (q.length < 2) { _toSuggestions.value = emptyList(); return }
+        val lq = q.lowercase()
+        _toSuggestions.value = allStationsForSearch.filter { s ->
+            s.name.lowercase().contains(lq) || s.city.lowercase().contains(lq) || s.code.lowercase().startsWith(lq)
+        }.take(5)
+        toSearchJob?.cancel()
+        toSearchJob = viewModelScope.launch {
+            delay(300)
+            api.autocompleteStation(q).onSuccess { list ->
+                if (list.isNotEmpty()) _toSuggestions.value = list.map { r ->
+                    val local = allStationsForSearch.firstOrNull { it.code.equals(r.code, ignoreCase = true) }
+                    StationInfo(r.code.orEmpty(), r.name.orEmpty(), local?.city ?: "", local?.lat ?: 0.0, local?.lng ?: 0.0)
+                }.take(5)
+            }
+        }
+    }
+
+    fun onFromStationSelected(station: StationInfo) {
+        _fromStation.value = station
+        _fromQuery.value   = station.name
+        _fromSuggestions.value = emptyList()
+    }
+
+    fun onToStationSelected(station: StationInfo) {
+        _toStation.value = station
+        _toQuery.value   = station.name
+        _toSuggestions.value = emptyList()
+    }
+
+    fun swapStations() {
+        val tmpStation = _fromStation.value; val tmpQuery = _fromQuery.value
+        _fromStation.value = _toStation.value; _fromQuery.value = _toQuery.value
+        _toStation.value   = tmpStation;       _toQuery.value   = tmpQuery
+    }
+
+    fun searchBetween() {
+        val from = _fromStation.value ?: return
+        val to   = _toStation.value   ?: return
+        viewModelScope.launch {
+            _betweenLoading.value = true
+            _betweenError.value   = null
+            try {
+                withTimeoutOrNull(30_000L) {
+                    val result = api.getBetweenTrains(from.code, to.code)
+                    val trains = result.getOrNull()
+                    if (trains != null) {
+                        _betweenResults.value = trains
+                        if (trains.isEmpty()) _betweenError.value = "No trains found between ${from.name} and ${to.name}"
+                    } else {
+                        _betweenError.value = result.exceptionOrNull().toUserMessage("Could not load trains")
+                    }
+                } ?: run { _betweenError.value = "Connection timed out. Please try again." }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _betweenError.value = "Could not load trains. Please try again."
+            } finally {
+                _betweenLoading.value = false
+            }
+        }
+    }
+
+    fun clearBetweenResults() {
+        _betweenResults.value = emptyList()
+        _betweenError.value   = null
+        _betweenLoading.value = false
+    }
+
+    fun onBetweenTrainTapped(train: BetweenTrain) {
+        onTrainCardTapped(com.yatrain.app.models.Train(
+            number          = train.number,
+            name            = train.name,
+            source          = train.source,
+            sourceCode      = train.sourceCode,
+            destination     = train.destination,
+            destinationCode = train.destinationCode,
+            departureTime   = train.departureTime,
+            arrivalTime     = train.arrivalTime,
+            duration        = train.duration
+        ))
     }
 }

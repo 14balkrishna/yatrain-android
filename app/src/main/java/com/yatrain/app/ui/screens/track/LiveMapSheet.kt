@@ -73,11 +73,11 @@ private fun realT(stations: List<Station>, currentIdx: Int): Double {
         ?: return currentIdx.toDouble() / (stations.size - 1).coerceAtLeast(1)
 
     val current = stations.getOrNull(currentIdx) ?: return 0.0
-    val currentKm = current.distance.toDoubleOrNull() ?: 0.0
+    val currentKm = current.distance.orEmpty().toDoubleOrNull() ?: 0.0
 
     val next = stations.getOrNull(currentIdx + 1)
     if (next != null) {
-        val nextKm = next.distance.toDoubleOrNull() ?: currentKm
+        val nextKm = next.distance.orEmpty().toDoubleOrNull() ?: currentKm
         val depMin = parseMin(current.departure)
         val arrMin = parseMin(next.arrival)
         if (depMin != null && arrMin != null && arrMin > depMin) {
@@ -93,8 +93,8 @@ private fun realT(stations: List<Station>, currentIdx: Int): Double {
 private fun scheduleSpeedKmh(stations: List<Station>, currentIdx: Int): Double {
     val cur  = stations.getOrNull(currentIdx) ?: return 60.0
     val next = stations.getOrNull(currentIdx + 1) ?: return 60.0
-    val curKm  = cur.distance.toDoubleOrNull()  ?: return 60.0
-    val nextKm = next.distance.toDoubleOrNull() ?: return 60.0
+    val curKm  = cur.distance.orEmpty().toDoubleOrNull()  ?: return 60.0
+    val nextKm = next.distance.orEmpty().toDoubleOrNull() ?: return 60.0
     val dep = parseMin(cur.departure)  ?: return 60.0
     val arr = parseMin(next.arrival)   ?: return 60.0
     val tH  = (arr - dep) / 60.0
@@ -390,7 +390,7 @@ fun LiveMapSheet(
     // ── Route geometry ────────────────────────────────────────────────────────
     val routePoints = remember(schedule) {
         schedule.mapNotNull { st ->
-            stationCoordFor(st.code)?.let { info -> st to LatLng(info.lat, info.lng) }
+            stationCoordFor(st.code.orEmpty())?.let { info -> st to LatLng(info.lat, info.lng) }
         }
     }
     val coords = remember(routePoints) { routePoints.map { it.second } }
@@ -744,8 +744,8 @@ fun LiveMapSheet(
             }
 
             // Open in Google Maps CTA
-            val mapsCoord = schedule.getOrNull(currentStopIndex)?.let { stationCoordFor(it.code) }
-                ?: schedule.firstOrNull()?.let { stationCoordFor(it.code) }
+            val mapsCoord = schedule.getOrNull(currentStopIndex)?.let { stationCoordFor(it.code.orEmpty()) }
+                ?: schedule.firstOrNull()?.let { stationCoordFor(it.code.orEmpty()) }
             mapsCoord?.let { coord ->
                 TextButton(
                     onClick  = {

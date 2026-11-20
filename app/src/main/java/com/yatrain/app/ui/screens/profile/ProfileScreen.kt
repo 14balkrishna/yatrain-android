@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yatrain.app.i18n.LocalStrings
 import com.yatrain.app.ui.components.HeroSection
@@ -44,6 +45,7 @@ fun ProfileScreen(
     val scope             = rememberCoroutineScope()
     var showPaywall       by remember { mutableStateOf(false) }
     val subViewModel: SubscriptionViewModel = viewModel()
+    val isPro by subViewModel.isPro.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -126,6 +128,11 @@ fun ProfileScreen(
                         )
                     }
                 }
+
+                com.yatrain.app.ui.components.AdBannerCarousel(
+                    isPro    = isPro,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
                 Spacer(Modifier.height(32.dp))
             }

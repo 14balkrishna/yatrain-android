@@ -20,8 +20,8 @@ android {
         applicationId = "com.yatrain.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.3.3"
+        versionCode = 20
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -34,8 +34,16 @@ android {
 
         buildConfigField("Boolean", "DEBUG_FORCE_PRO", "false")
 
+        // AdMob — replace with real IDs in secrets.properties before release
+        // Create separate banner units per screen in AdMob console for best tracking.
+        buildConfigField("String", "ADMOB_APP_ID",    "\"${secrets["ADMOB_APP_ID"]    ?: "ca-app-pub-3940256099942544~3347511713"}\"")
+        buildConfigField("String", "ADMOB_BANNER_1",  "\"${secrets["ADMOB_BANNER_1"]  ?: "ca-app-pub-3940256099942544/6300978111"}\"")
+        buildConfigField("String", "ADMOB_BANNER_2",  "\"${secrets["ADMOB_BANNER_2"]  ?: "ca-app-pub-3940256099942544/6300978111"}\"")
+        buildConfigField("String", "ADMOB_BANNER_3",  "\"${secrets["ADMOB_BANNER_3"]  ?: "ca-app-pub-3940256099942544/6300978111"}\"")
+
         manifestPlaceholders["appAuthRedirectScheme"] = "yatrain"
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = secrets["GOOGLE_MAPS_API_KEY"] ?: ""
+        manifestPlaceholders["ADMOB_APP_ID"] = secrets["ADMOB_APP_ID"] ?: "ca-app-pub-3940256099942544~3347511713"
     }
 
     signingConfigs {
@@ -123,6 +131,9 @@ dependencies {
     // ML Kit on-device translation (free, offline after first model download)
     implementation(libs.mlkit.translate)
     implementation(libs.kotlinx.coroutines.play.services)
+
+    // Google AdMob
+    implementation(libs.play.services.ads)
 
     // Testing
     testImplementation(libs.junit)

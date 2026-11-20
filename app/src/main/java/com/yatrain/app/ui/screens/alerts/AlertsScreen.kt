@@ -194,6 +194,13 @@ fun AlertsScreen(
                 )
             }
         }
+
+        item {
+            com.yatrain.app.ui.components.AdBannerCarousel(
+                isPro    = isPro,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
     }
 
     if (showPaywall) {

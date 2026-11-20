@@ -1,6 +1,7 @@
 package com.yatrain.app
 
 import android.app.Application
+import com.google.android.gms.ads.MobileAds
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.gotrue.Auth
 import io.github.jan.supabase.postgrest.Postgrest
@@ -15,6 +16,7 @@ class YatrainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        MobileAds.initialize(this)
         supabase = createSupabaseClient(
             supabaseUrl = BuildConfig.SUPABASE_URL,
             supabaseKey = BuildConfig.SUPABASE_ANON_KEY

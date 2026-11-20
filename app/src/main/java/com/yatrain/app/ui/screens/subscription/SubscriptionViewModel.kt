@@ -71,7 +71,7 @@ class SubscriptionViewModel(app: Application) : AndroidViewModel(app) {
     fun manageSubscription(context: Context) {
         val uri = Uri.parse(
             "https://play.google.com/store/account/subscriptions" +
-            "?sku=${com.yatrain.app.utils.Constants.SUBSCRIPTION_PRODUCT_ID}" +
+            "?sku=${com.yatrain.app.utils.Constants.MONTHLY_PRODUCT_ID}" +
             "&package=${context.packageName}"
         )
         context.startActivity(Intent(Intent.ACTION_VIEW, uri).apply {
