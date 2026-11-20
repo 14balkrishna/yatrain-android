@@ -101,7 +101,7 @@ data class PNRStatus(
     val pnrNumber: String = "",
     @SerializedName("train_number", alternate = ["trainNumber", "TrainNo", "trainNo", "train_no"])
     val trainNumber: String = "",
-    @SerializedName("train_name", alternate = ["trainName", "TrainName", "train_name"])
+    @SerializedName("train_name", alternate = ["trainName", "TrainName"])
     val trainName: String = "",
     @SerializedName("from", alternate = ["From", "from_station", "sourceStation", "source_station", "boarding_station_name", "boardingStationName"])
     val from: String = "",

@@ -1920,6 +1920,69 @@ fun PNRBoardingCard(
                     }
                 }
 
+                // ── Passenger rows ────────────────────────────────────────────
+                if (pnr.passengers.isNotEmpty()) {
+                    HorizontalDivider(color = Color(0xFFF0F0F0), modifier = Modifier.padding(horizontal = 20.dp))
+                    Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                        Text(
+                            "PASSENGERS",
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp, color = AppMuted
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        pnr.passengers.forEachIndexed { idx, pax ->
+                            if (idx > 0) Spacer(Modifier.height(8.dp))
+                            val curStatus  = pax.currentStatus.ifBlank  { pax.bookingStatus }
+                            val curDetails = pax.currentStatusDetails.ifBlank { pax.bookingStatusDetails }
+                            val coachBerth = buildString {
+                                val c = pax.currentCoachId.ifBlank { pax.bookingCoachId }
+                                val b = if (pax.currentBerthNo > 0) pax.currentBerthNo else pax.bookingBerthNo
+                                val bc = pax.currentBerthCode.ifBlank { pax.bookingBerthCode }
+                                if (c.isNotBlank()) append(c)
+                                if (b > 0) { if (isNotEmpty()) append("/"); append(b) }
+                                if (bc.isNotBlank()) { if (isNotEmpty()) append(" "); append(bc) }
+                            }
+                            val isConf = curStatus.contains("CNF", ignoreCase = true)
+                            val isWL   = curStatus.contains("WL",  ignoreCase = true) ||
+                                         curStatus.contains("CAN", ignoreCase = true)
+                            val sColor = when { isConf -> AppGreen; isWL -> AppOrange; else -> AppMuted }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(28.dp).clip(CircleShape).background(AppNavy.copy(0.08f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "${idx + 1}", fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold, color = AppNavy
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "Passenger ${idx + 1}",
+                                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = AppTitle
+                                    )
+                                    if (curDetails.isNotBlank()) {
+                                        Text(curDetails, fontSize = 11.sp, color = AppMuted)
+                                    }
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        curStatus.ifBlank { "–" },
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = sColor
+                                    )
+                                    if (coachBerth.isNotBlank()) {
+                                        Text(coachBerth, fontSize = 11.sp, color = AppMuted)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 HorizontalDivider(color = Color(0xFFF0F0F0), modifier = Modifier.padding(horizontal = 20.dp))
 
                 // Decorative barcode
