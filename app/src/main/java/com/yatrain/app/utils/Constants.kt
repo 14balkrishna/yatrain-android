@@ -7,10 +7,11 @@ object Constants {
     // Supabase
     const val OAUTH_REDIRECT = "yatrain://auth-callback"
 
-    // Google Play — two separate subscription products
-    // Product IDs (top-level subscription IDs in Play Console)
-    const val MONTHLY_PRODUCT_ID = "pro.monthly"
-    const val ANNUAL_PRODUCT_ID  = "pro.annual"
+    // Google Play — one subscription product with two base plans
+    const val MONTHLY_PRODUCT_ID    = "pro.monthly"       // the single product ID
+    const val ANNUAL_PRODUCT_ID     = "pro.monthly"       // same product — annual is a base plan inside it
+    const val MONTHLY_BASE_PLAN_ID  = "monthly-base"      // base plan ID for ₹49/month
+    const val ANNUAL_BASE_PLAN_ID   = "yatrain-base-yearly" // base plan ID for ₹599/year
 
     // Legal URLs
     const val PRIVACY_URL = "https://yatrain.com/privacy.html"

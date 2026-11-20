@@ -107,41 +107,42 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
 
     private suspend fun loadProducts() {
         if (!ensureConnected()) return
-
+        // Both plans (monthly + annual) live under the single "pro.monthly" product
         val params = QueryProductDetailsParams.newBuilder()
             .setProductList(listOf(
                 QueryProductDetailsParams.Product.newBuilder()
                     .setProductId(Constants.MONTHLY_PRODUCT_ID)
-                    .setProductType(BillingClient.ProductType.SUBS)
-                    .build(),
-                QueryProductDetailsParams.Product.newBuilder()
-                    .setProductId(Constants.ANNUAL_PRODUCT_ID)
                     .setProductType(BillingClient.ProductType.SUBS)
                     .build()
             )).build()
 
         val result = billingClient.queryProductDetails(params)
         if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            val list = result.productDetailsList ?: emptyList()
-            monthlyProduct = list.firstOrNull { it.productId == Constants.MONTHLY_PRODUCT_ID }
-            annualProduct  = list.firstOrNull { it.productId == Constants.ANNUAL_PRODUCT_ID }
+            val product = result.productDetailsList?.firstOrNull {
+                it.productId == Constants.MONTHLY_PRODUCT_ID
+            }
+            monthlyProduct = product
+            annualProduct  = product   // same product — different base plans inside it
         }
     }
 
-    // Returns the first available offer token from the product.
-    // Each product is a single-plan subscription, so the first offer IS the right offer.
-    private fun ProductDetails.firstOfferToken(): String? =
-        subscriptionOfferDetails?.firstOrNull()?.offerToken
+    // Returns the offer token for the given base plan ID.
+    // Falls back to first available offer if exact base plan ID not found.
+    private fun ProductDetails.offerTokenForBasePlan(basePlanId: String): String? {
+        val offers = subscriptionOfferDetails ?: return null
+        return offers.firstOrNull { it.basePlanId == basePlanId }?.offerToken
+            ?: offers.firstOrNull()?.offerToken
+    }
 
     fun getMonthlyPrice(): String =
         monthlyProduct?.subscriptionOfferDetails
-            ?.firstOrNull()
+            ?.firstOrNull { it.basePlanId == Constants.MONTHLY_BASE_PLAN_ID }
             ?.pricingPhases?.pricingPhaseList?.firstOrNull()
             ?.formattedPrice ?: "₹49"
 
     fun getAnnualPrice(): String =
         annualProduct?.subscriptionOfferDetails
-            ?.firstOrNull()
+            ?.firstOrNull { it.basePlanId == Constants.ANNUAL_BASE_PLAN_ID }
             ?.pricingPhases?.pricingPhaseList?.firstOrNull()
             ?.formattedPrice ?: "₹599"
 
@@ -149,11 +150,11 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
 
     fun purchaseMonthly(activity: Activity) {
         if (BuildConfig.DEBUG) { simulatePurchase(); return }
-        launchBillingFlow(activity, monthlyProduct)
+        launchBillingFlow(activity, monthlyProduct, Constants.MONTHLY_BASE_PLAN_ID)
     }
     fun purchaseAnnual(activity: Activity) {
         if (BuildConfig.DEBUG) { simulatePurchase(); return }
-        launchBillingFlow(activity, annualProduct)
+        launchBillingFlow(activity, annualProduct, Constants.ANNUAL_BASE_PLAN_ID)
     }
 
     // Debug-only: simulates a successful purchase without Play Console
@@ -168,12 +169,12 @@ class SubscriptionManager(context: Context) : PurchasesUpdatedListener {
         }
     }
 
-    private fun launchBillingFlow(activity: Activity, product: ProductDetails?) {
+    private fun launchBillingFlow(activity: Activity, product: ProductDetails?, basePlanId: String) {
         if (product == null) {
             _purchaseError.value = "Product unavailable. Check your internet connection and try again."
             return
         }
-        val offerToken = product.firstOfferToken()
+        val offerToken = product.offerTokenForBasePlan(basePlanId)
         if (offerToken == null) {
             _purchaseError.value = "No active offer found. Please ensure the app is up to date."
             return
