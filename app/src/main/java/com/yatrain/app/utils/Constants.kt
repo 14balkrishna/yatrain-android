@@ -8,8 +8,9 @@ object Constants {
     const val OAUTH_REDIRECT = "yatrain://auth-callback"
 
     // Google Play — two separate subscription products
-    const val MONTHLY_PRODUCT_ID = "monthly-base"
-    const val ANNUAL_PRODUCT_ID  = "yatrain-base-yearly"
+    // Product IDs (top-level subscription IDs in Play Console)
+    const val MONTHLY_PRODUCT_ID = "pro.monthly"
+    const val ANNUAL_PRODUCT_ID  = "pro.annual"
 
     // Legal URLs
     const val PRIVACY_URL = "https://yatrain.com/privacy.html"
