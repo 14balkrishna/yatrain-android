@@ -357,7 +357,12 @@ fun SearchScreen(
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
-                item { QuickServicesSection() }
+                item {
+                    com.yatrain.app.ui.components.AdBannerCarousel(
+                        isPro    = isPro,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
             } else if (selectedStation != null) {
                 item {
                     StationTrainsSection(
@@ -434,7 +439,12 @@ fun SearchScreen(
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
-                item { QuickServicesSection() }
+                item {
+                    com.yatrain.app.ui.components.AdBannerCarousel(
+                        isPro    = isPro,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
             }
         }
 
@@ -1712,71 +1722,6 @@ private fun AffiliateBannerCard(banner: AffiliateBanner) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Quick Services
-// ─────────────────────────────────────────────────────────────────────────────
-
-private data class QuickService(
-    val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val bgColor: Color,
-    val iconColor: Color,
-    val playStoreQuery: String
-)
-
-private val quickServices = listOf(
-    QuickService("Recharge", Icons.Outlined.PhoneAndroid, Color(0xFF5C35CC).copy(0.12f), Color(0xFF5C35CC), "mobile recharge india"),
-    QuickService("Hotels",   Icons.Outlined.Hotel,        Color(0xFFC0182E).copy(0.12f), Color(0xFFC0182E), "hotel booking india"),
-    QuickService("Cab",      Icons.Outlined.LocalTaxi,    Color(0xFF1A7A40).copy(0.12f), Color(0xFF1A7A40), "ola cabs"),
-    QuickService("Flights",  Icons.Outlined.Flight,       Color(0xFF0277BD).copy(0.12f), Color(0xFF0277BD), "flight booking india"),
-    QuickService("Bus",      Icons.Outlined.DirectionsBus, Color(0xFFD84A12).copy(0.12f), Color(0xFFD84A12), "redbus india"),
-)
-
-@Composable
-private fun QuickServicesSection() {
-    val s = LocalStrings.current
-    Column(modifier = Modifier.padding(horizontal = 18.dp)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(s.quickServices, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, color = AppMuted)
-            Text(s.viewAll, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = AppTitle)
-        }
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = AppCard),
-            border = BorderStroke(1.dp, AppBorder), elevation = CardDefaults.cardElevation(2.dp)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 18.dp, horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                quickServices.forEach { QuickServiceItem(it) }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun QuickServiceItem(service: QuickService) {
-    val context = LocalContext.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication        = null
-            ) {
-                val uri = Uri.parse("market://search?q=${Uri.encode(service.playStoreQuery)}")
-                try { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                catch (_: Exception) {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW,
-                            Uri.parse("https://play.google.com/store/search?q=${Uri.encode(service.playStoreQuery)}"))
-                    )
-                }
-            }
-            .padding(horizontal = 4.dp)
-    ) {
-        Box(modifier = Modifier.size(50.dp).clip(RoundedCornerShape(14.dp)).background(service.bgColor), contentAlignment = Alignment.Center) {
-            Icon(service.icon, service.label, tint = service.iconColor, modifier = Modifier.size(26.dp))
-        }
-        Spacer(Modifier.height(7.dp))
-        Text(service.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AppTitle)
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PNR Boarding-pass card  (home screen, shown when PNR result arrives)
